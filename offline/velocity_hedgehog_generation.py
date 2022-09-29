@@ -11,6 +11,7 @@ Data:
 * Delta_q -- joint grid size
 * Z, Phi, Gamma -- velocity hedgehog grids
 """
+import time
 
 import numpy as np
 
@@ -58,14 +59,18 @@ def main(robot: Robot, delta_q, Z, Phi, Gamma, svthres=0.1):
     for i in range(Z.shape[0]):
         qz = getqat(i, Xz)
         print("height", Z[i])
+        if len(qz) == 0:
+            continue
+        st = time.time()
         for j, phi in enumerate(Phi):
             for k, gamma in enumerate(Gamma):
-                for q in qz:
-                    vel = LP(phi, gamma, q[:7], robot)
-                    if vel > vel_max[i, j, k]:
-                        vel_max[i, j, k] = vel
-                        argmax_q[i, j, k] = q[:7]  # including xyz
+                vels = [LP(phi, gamma, q[:7], robot) for q in qz]
+                n = np.argmax(vels)
+                vel_max[i, j, k] = vels[n]
+                argmax_q[i, j, k] = qz[n][:7]
 
+        timecost = time.time() - st
+        print("use {0:.2f}s for {1} q, {2:.3f} s per q".format(timecost, len(qz), timecost/len(qz)))
     return vel_max, argmax_q
 
 
@@ -179,7 +184,7 @@ if __name__ == "__main__":
     Z = np.arange(0, 1.2, 0.05)
     Phi = np.arange(-np.pi / 2, np.pi / 2, np.pi / 4)  # np.pi / 12
     Gamma = np.arange(np.pi / 6, np.pi / 3, np.pi / 12)  # np.pi / 36
-    vel_max, argmax_q = main(robot=pandas, delta_q=0.5, Z=Z, Phi=Phi, Gamma=Gamma)
+    vel_max, argmax_q = main(robot=pandas, delta_q=0.8, Z=Z, Phi=Phi, Gamma=Gamma)
     np.save("vel_max", vel_max)
     np.save("argmax_q", argmax_q)
     print(vel_max.shape)

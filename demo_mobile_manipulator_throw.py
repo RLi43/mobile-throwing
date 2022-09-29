@@ -15,6 +15,9 @@ from ruckig import InputParameter, Ruckig, Trajectory, Result
 build_path = Path(__file__).parent.absolute().parent / 'build'
 path.insert(0, str(build_path))
 
+TRAJ_GEN = False
+ANIMATE = False
+
 def main(box_position):
     # Height of target box relative to panda base, [-0.5, 0.9] is good
     z = box_position[2]
@@ -67,27 +70,29 @@ def main(box_position):
 
     print("Given query z=", "{0:0.2f}".format(z), ", found", len(throw_configs),
           "good throws in", "{0:0.2f}".format(1000 * (time.time() - st)), "ms")
+    if TRAJ_GEN:
+        # select the minimum-time trajectory to simulate
+        selected_idx = np.argmin(traj_durations)
+        traj_throw = trajs[selected_idx]
+        throw_config_full = throw_configs[selected_idx]
 
-    # select the minimum-time trajectory to simulate
-    selected_idx = np.argmin(traj_durations)
-    traj_throw = trajs[selected_idx]
-    throw_config_full = throw_configs[selected_idx]
+        # Other option: select the one with maximum range
+        # selected_idx = np.argmin(throw_candidates[:, 0])
+        # throw_config_full = get_full_throwing_config(robot, q_candidates[selected_idx],
+        #                                                  phi_candidates[selected_idx],
+        #                                                  throw_candidates[selected_idx])
+        # traj_throw = get_traj_from_ruckig(q0=q0, q0_dot=q0_dot, qd=throw_config_full[0], qd_dot=throw_config_full[3],
+        #                                       base0=base0, based =-throw_config_full[-1][:-1])
+        p.disconnect()
 
-    # Other option: select the one with maximum range
-    # selected_idx = np.argmin(throw_candidates[:, 0])
-    # throw_config_full = get_full_throwing_config(robot, q_candidates[selected_idx],
-    #                                                  phi_candidates[selected_idx],
-    #                                                  throw_candidates[selected_idx])
-    # traj_throw = get_traj_from_ruckig(q0=q0, q0_dot=q0_dot, qd=throw_config_full[0], qd_dot=throw_config_full[3],
-    #                                       base0=base0, based =-throw_config_full[-1][:-1])
-    p.disconnect()
+        print("box_position: ", throw_config_full[-1])
+        print("throwing range: ", "{0:0.2f}".format(-throw_candidates[selected_idx, 0]),
+              "throwing height", "{0:0.2f}".format(throw_candidates[selected_idx, 1]))
+    if ANIMATE:
+        video_path=experiment_path+"/moving_base/throw"+ str(int(1000*z))+".mp4"
+        throw_simulation_mobile(traj_throw, throw_config_full, g) #, video_path=video_path)
 
-    print("box_position: ", throw_config_full[-1])
-    print("throwing range: ", "{0:0.2f}".format(-throw_candidates[selected_idx, 0]),
-          "throwing height", "{0:0.2f}".format(throw_candidates[selected_idx, 1]))
-    video_path=experiment_path+"/moving_base/throw"+ str(int(1000*z))+".mp4"
-    throw_simulation_mobile(traj_throw, throw_config_full, g) #, video_path=video_path)
-
+from bisect import bisect_left
 def brt_chunk_robot_data_matching(z_target_to_base, robot_path, brt_path, thres=0.1):
     """
 
@@ -112,30 +117,48 @@ def brt_chunk_robot_data_matching(z_target_to_base, robot_path, brt_path, thres=
     num_brt_zs = brt_zs.shape[0]
     shift_idx = round((z_target_to_base+brt_z_min) / 0.05)
     with open (brt_path + '/brt_chunk.pkl', 'rb') as fp:
-        brt_chunk = pickle.load(fp)
-    q_candidates = []
-    phi_candidates = []
+        brt_chunk = pickle.load(fp)  # list of list of 2d-array
+    q_indices = []
+    phi_indices = []
     x_candidates = []
+    lv = len(phis)
     for i, z in enumerate(robot_zs):
         if i-shift_idx > num_brt_zs-1:
             continue
         for k in range(num_gammas):
             brt_data_z_gamma = brt_chunk[i-shift_idx][k]
-            if brt_data_z_gamma is None:
+
+            lb = len(brt_data_z_gamma)
+            if lb == 0:
                 continue
-            for j, phi in enumerate(phis):
-                # adaptive cutoff according to max velo
-                max_velo = robot_phi_gamma_velos_naive[i, j, k]
-                brt_candidate = brt_data_z_gamma[brt_data_z_gamma[:, 4]<max_velo-thres]
-                if brt_candidate.shape[0] > 0:
-                    assert np.max(brt_candidate[:, 4]) < max_velo - thres
-                    n = brt_candidate.shape[0]
-                    q_add = [mesh[robot_phi_gamma_q_idxs_naive[i,j,k].astype(int), :].flatten()] * n
-                    phi_add = [phi] * n
-                    x_add = list(brt_candidate[:, :-1])
-                    q_candidates = q_candidates + q_add
-                    phi_candidates = phi_candidates + phi_add
-                    x_candidates = x_candidates + x_add
+            max_velos = robot_phi_gamma_velos_naive[i, :, k]
+            vsortedind = np.argsort(max_velos)
+            bv = brt_data_z_gamma[:, 4]
+            bsortedind = np.argsort(bv)  # can it be a range?
+            bsortedlist = bv[bsortedind]
+            b = 0
+            for v in range(lv):
+                index = bisect_left(bsortedlist[b:], max_velos[vsortedind[v]] - thres)
+                if index > 0:
+                    # # add all velo[v:end], brt[b:index] pair
+                    # q_add = list(mesh[robot_phi_gamma_q_idxs_naive[i, vsortedind[v:], k].astype(int), :]) * index
+                    # phi_add = list(np.array([phis[vsortedind[v:]]] * index).flatten())
+                    x_add = list(brt_data_z_gamma[bsortedind[b:index+b], :-1]) * (lv - v)
+
+                    # q_candidates = q_candidates + q_add
+                    # phi_candidates = phi_candidates + phi_add
+                    x_candidates = x_candidates + x_add # the size of the indices: int, int, int
+
+                    q_indices += list(robot_phi_gamma_q_idxs_naive[i, vsortedind[v:], k].astype(int)) * index
+                    phi_indices += list(vsortedind[v:]) * index
+
+                    if index >= lb - b:
+                        # even the smallest max_velo is bigger than the brt requirement
+                        break
+                    b += index
+                # else:# the max_velo is smaller than any brt velo
+    q_candidates = mesh[np.array(q_indices), :]
+    phi_candidates = phis[phi_indices]
     print("Given query z=", "{0:0.2f}".format(z_target_to_base) , ", found", len(q_candidates),
           "initial guesses in", "{0:0.2f}".format(1000 * (time.time() - st)), "ms")
 

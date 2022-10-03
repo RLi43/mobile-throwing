@@ -58,16 +58,20 @@ def main(robot: Robot, delta_q, Z, Phi, Gamma, svthres=0.1):
     # Build velocity hedgehog
     for i in range(Z.shape[0]):
         qz = getqat(i, Xz)
-        print("height", Z[i])
+        print("height", Z[i], "Num(q):", len(qz))
         if len(qz) == 0:
             continue
         st = time.time()
-        for j, phi in enumerate(Phi):
-            for k, gamma in enumerate(Gamma):
-                vels = [LP(phi, gamma, q[:7], robot) for q in qz]
-                n = np.argmax(vels)
-                vel_max[i, j, k] = vels[n]
-                argmax_q[i, j, k] = qz[n][:7]
+        vels = np.zeros((len(qz), num_phi, num_gamma))
+        for d, q in enumerate(qz):
+            AE, J = robot.forward(q[:7])
+            fracyx = AE[1]/AE[0]
+            Jinv = np.linalg.pinv(J[:3, :])
+            qdmin, qdmax = robot.q_dot_min, robot.q_dot_max
+            vels[d, :, :] = np.array([[LP(phi, gamma, Jinv, fracyx, qdmin, qdmax) for gamma in Gamma] for phi in Phi])
+
+        vel_max[i, :, :] = np.max(vels, axis=0)
+        argmax_q[i, :, :] = np.array(qz)[np.argmax(vels, axis=0), :7]
 
         timecost = time.time() - st
         print("use {0:.2f}s for {1} q, {2:.3f} s per q".format(timecost, len(qz), timecost/len(qz)))
@@ -81,7 +85,6 @@ def computeMesh(q_min, q_max, delta_q):
 
 def filterBySingularValue(Q, robot: Robot, thres):
     """
-    TODO
     :param Q: sampled q list
     :return: [X, q] (X: x, y, z)
     """
@@ -126,8 +129,7 @@ def getqat(i, Xz):
 
 import cvxpy as cp
 
-
-def LP(phi, gamma, q, robot):
+def LP(phi, gamma, Jinv, fracyx, qdmin, qdmax):
     """
     max s that:
     - q_dot_min <= inv(J(q))*v <= q_dot_max
@@ -140,16 +142,13 @@ def LP(phi, gamma, q, robot):
     :param robot:
     :return:
     """
-    AE, J = robot.forward(q)
-    x, y = AE[:2]
-    Jinv = np.linalg.pinv(J[:3, :])
 
     s = cp.Variable(1)
     v = cp.Variable(3)
     objective = cp.Maximize(s)
-    constraints = [robot.q_dot_min <= Jinv @ v, Jinv @ v <= robot.q_dot_max,
+    constraints = [qdmin <= Jinv @ v, Jinv @ v <= qdmax,
                    v == s * np.array(
-                       [np.cos(gamma) * np.cos(y / x + phi), np.cos(gamma) * np.sin(y / x + phi), np.sin(gamma)])]
+                       [np.cos(gamma) * np.cos(fracyx + phi), np.cos(gamma) * np.sin(fracyx + phi), np.sin(gamma)])]
     prob = cp.Problem(objective, constraints)
     result = prob.solve()
     return s.value[0]

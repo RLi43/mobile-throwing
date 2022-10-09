@@ -113,56 +113,65 @@ def brt_chunk_robot_data_matching(z_target_to_base, robot_path, brt_path, thres=
     num_gammas = robot_phi_gamma_q_idxs_naive.shape[2]
 
     brt_zs = np.load(brt_path + '/brt_zs.npy')
-    brt_z_min = np.min(brt_zs)
+    brt_z_min, brt_z_max = np.min(brt_zs), np.max(brt_zs)
     num_brt_zs = brt_zs.shape[0]
-    shift_idx = round((z_target_to_base+brt_z_min) / 0.05)
+
+    # align the z idx
+    if z_target_to_base + brt_z_min > min(robot_zs):
+        rzs_idx_start = round((z_target_to_base+brt_z_min) / 0.05)
+        bzs_idx_start = 0
+    else:
+        rzs_idx_start = 0
+        bzs_idx_start = -round((z_target_to_base+brt_z_min) / 0.05)
+    if z_target_to_base + brt_z_max > max(robot_zs):
+        rzs_idx_end = num_robot_zs - 1
+        bzs_idx_end = num_brt_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs))/ 0.05)
+    else:
+        rzs_idx_end = num_robot_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs))/ 0.05)
+        bzs_idx_end = num_brt_zs - 1
+    assert bzs_idx_end - bzs_idx_start == rzs_idx_end - rzs_idx_start
+    z_num = bzs_idx_end - bzs_idx_start + 1
     with open (brt_path + '/brt_chunk.pkl', 'rb') as fp:
         brt_chunk = pickle.load(fp)  # list of list of 2d-array
-    q_indices = []
-    phi_indices = []
-    x_candidates = []
-    lv = len(phis)
-    for i, z in enumerate(robot_zs):
-        if i-shift_idx > num_brt_zs-1:
-            continue
-        for k in range(num_gammas):
-            brt_data_z_gamma = brt_chunk[i-shift_idx][k]
 
-            lb = len(brt_data_z_gamma)
-            if lb == 0:
-                continue
-            max_velos = robot_phi_gamma_velos_naive[i, :, k]
-            vsortedind = np.argsort(max_velos)
-            bv = brt_data_z_gamma[:, 4]
-            bsortedind = np.argsort(bv)  # can it be a range?
-            bsortedlist = bv[bsortedind]
-            b = 0
-            for v in range(lv):
-                index = bisect_left(bsortedlist[b:], max_velos[vsortedind[v]] - thres)
-                if index > 0:
-                    # # add all velo[v:end], brt[b:index] pair
-                    # q_add = list(mesh[robot_phi_gamma_q_idxs_naive[i, vsortedind[v:], k].astype(int), :]) * index
-                    # phi_add = list(np.array([phis[vsortedind[v:]]] * index).flatten())
-                    x_add = list(brt_data_z_gamma[bsortedind[b:index+b], :-1]) * (lv - v)
+    st2 = time.time()
+    # reshape brt chunk to matrix of (z, gamma, max_length)
+    brt_tensor = []
+    l = 0
+    while True:
+        new_layer_brt = np.ones((z_num, num_gammas, 5))
+        stillhasvalue = False
+        for i in range(z_num):
+            for k in range(num_gammas):
+                if len(brt_chunk[i + bzs_idx_start][k]) < l + 1:
+                    new_layer_brt[i, k, :] = np.nan
+                else:
+                    stillhasvalue = True
+                    new_layer_brt[i, k, :] = brt_chunk[i + bzs_idx_start][k][l]
+        if not stillhasvalue:
+            break
+        brt_tensor.append(new_layer_brt)
+        l += 1
+    brt_tensor = np.array(brt_tensor)
+    brt_tensor = np.moveaxis(brt_tensor, 0, 2)
+    brt_tensor = np.expand_dims(brt_tensor, axis=1) # insert Phi dimension
+    # BRT-Tensor = {z, phi(length=1), gamma, brt states array, x(length=5))}
+    st3 = time.time()
 
-                    # q_candidates = q_candidates + q_add
-                    # phi_candidates = phi_candidates + phi_add
-                    x_candidates = x_candidates + x_add # the size of the indices: int, int, int
+    validate = np.argwhere(np.expand_dims(robot_phi_gamma_velos_naive, axis=3) - thres - brt_tensor[:, :, :, :, 4] > 0)
+    # validate: z, phi, gamma, idx_of_brt
 
-                    q_indices += list(robot_phi_gamma_q_idxs_naive[i, vsortedind[v:], k].astype(int)) * index
-                    phi_indices += list(vsortedind[v:]) * index
+    q_indice = validate[:, :3]
+    q_indice[:, 0] += rzs_idx_start
+    q_candidates = mesh[robot_phi_gamma_q_idxs_naive[tuple(q_indice.T)].astype(int), :]
+    phi_candidates = phis[validate[:, 1]]
+    x_candidates = brt_tensor[:, 0, :, :, :][tuple(np.r_['-1', validate[:, :1], validate[:, 2:4]].T)][:, :4]
+    print("Given query z=", "{0:0.2f}".format(z_target_to_base), ", found", len(q_candidates),
+          "initial guesses in", "{0:0.2f}".format(1000 * (time.time() - st)), "ms",
+          "\n\tcore operation takes {0:0.2f}".format(1000 * (time.time() - st3)), "ms",
+          "\n\tgeneration of the BRT tensor takes {0:0.2f}".format(1000 * (st3 - st2)), "ms",)
 
-                    if index >= lb - b:
-                        # even the smallest max_velo is bigger than the brt requirement
-                        break
-                    b += index
-                # else:# the max_velo is smaller than any brt velo
-    q_candidates = mesh[np.array(q_indices), :]
-    phi_candidates = phis[phi_indices]
-    print("Given query z=", "{0:0.2f}".format(z_target_to_base) , ", found", len(q_candidates),
-          "initial guesses in", "{0:0.2f}".format(1000 * (time.time() - st)), "ms")
-
-    return  q_candidates, phi_candidates, x_candidates
+    return q_candidates, phi_candidates, x_candidates
 
 def get_full_throwing_config(robot, q, phi, throw):
     """

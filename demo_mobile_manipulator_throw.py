@@ -39,8 +39,9 @@ def main(box_position):
     p.setAdditionalSearchPath(pybullet_data.getDataPath())  # optionally
     urdf_path = "franka_panda/panda.urdf"
     robot = p.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True, flags=p.URDF_USE_INERTIA_FROM_FILE)
+    load_data(robot_path, experiment_path)
     # get initial guess
-    q_candidates,phi_candidates,throw_candidates = brt_chunk_robot_data_matching(z, robot_path=robot_path, brt_path=experiment_path)
+    q_candidates,phi_candidates,throw_candidates = brt_chunk_robot_data_matching(z)
     q_candidates = np.array(q_candidates)
     phi_candidates = np.array(phi_candidates)
     throw_candidates = np.array(throw_candidates)
@@ -92,36 +93,44 @@ def main(box_position):
         video_path=experiment_path+"/moving_base/throw"+ str(int(1000*z))+".mp4"
         throw_simulation_mobile(traj_throw, throw_config_full, g) #, video_path=video_path)
 
-from bisect import bisect_left
-def brt_chunk_robot_data_matching(z_target_to_base, robot_path, brt_path, thres=0.1):
-    """
 
-    :param z:           z_target-z_arm_base
-    :param robot_path:
-    :param brt_path:
-    :return:
-    """
-    # Given target position, find out initial guesses of (q, phi, x), that is to be feed to Ruckig
+phis, robot_zs, brt_zs, num_gammas = None, None, None, None
+mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor = None, None, None, None
+def load_data(robot_path, brt_path):
+    # TODO: Convert BRT state points to tensor
+    global phis, robot_zs, brt_zs, num_gammas, mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor
     st = time.time()
     phis = np.linspace(-90, 90, 13)
     # robot_zs = np.load(robot_path + '/robot_zs.npy')
     robot_zs = np.arange(start=0.0, stop=1.10+0.01, step=0.05)
-    num_robot_zs = robot_zs.shape[0]
     mesh = np.load(robot_path+'/qs.npy')
     robot_phi_gamma_velos_naive = np.load(robot_path + '/phi_gamma_velos_naive.npy')
     robot_phi_gamma_q_idxs_naive = np.load(robot_path + '/phi_gamma_q_idxs_naive.npy')
     num_gammas = robot_phi_gamma_q_idxs_naive.shape[2]
 
     brt_zs = np.load(brt_path + '/brt_zs.npy')
-    brt_z_min, brt_z_max = np.min(brt_zs), np.max(brt_zs)
-    num_brt_zs = brt_zs.shape[0]
 
-    with open (brt_path + '/brt_chunk.pkl', 'rb') as fp:
-        brt_chunk = pickle.load(fp)  # list of list of 2d-array
+    brt_tensor = np.load(brt_path + '/brt_tensor.npy')
+    ct = time.time()
+    print("Loading cost {0:0.2f} ms".format(1000 * (ct - st)))
 
-    st0 = time.time()
+
+def brt_chunk_robot_data_matching(z_target_to_base, thres=0.1):
+    """
+
+    :param thres:
+    :param z_target_to_base:
+    :return:
+    """
+    # Given target position, find out initial guesses of (q, phi, x), that is to be feed to Ruckig
+
+    global phis, robot_zs, brt_zs, num_gammas, mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor
+    st = time.time()
 
     # align the z idx
+    num_robot_zs = robot_zs.shape[0]
+    num_brt_zs = brt_zs.shape[0]
+    brt_z_min, brt_z_max = np.min(brt_zs), np.max(brt_zs)
     if z_target_to_base + brt_z_min > min(robot_zs):
         rzs_idx_start = round((z_target_to_base+brt_z_min) / 0.05)
         bzs_idx_start = 0
@@ -130,38 +139,19 @@ def brt_chunk_robot_data_matching(z_target_to_base, robot_path, brt_path, thres=
         bzs_idx_start = -round((z_target_to_base+brt_z_min) / 0.05)
     if z_target_to_base + brt_z_max > max(robot_zs):
         rzs_idx_end = num_robot_zs - 1
-        bzs_idx_end = num_brt_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs))/ 0.05)
+        bzs_idx_end = num_brt_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs)) / 0.05)
     else:
-        rzs_idx_end = num_robot_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs))/ 0.05)
+        rzs_idx_end = num_robot_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs)) / 0.05)
         bzs_idx_end = num_brt_zs - 1
     assert bzs_idx_end - bzs_idx_start == rzs_idx_end - rzs_idx_start
-    z_num = bzs_idx_end - bzs_idx_start + 1
+    # z_num = bzs_idx_end - bzs_idx_start + 1
 
-    st2 = time.time()
-    # reshape brt chunk to matrix of (z, gamma, max_length)
-    brt_tensor = []
-    l = 0
-    while True:
-        new_layer_brt = np.ones((z_num, num_gammas, 5))
-        stillhasvalue = False
-        for i in range(z_num):
-            for k in range(num_gammas):
-                if len(brt_chunk[i + bzs_idx_start][k]) < l + 1:
-                    new_layer_brt[i, k, :] = np.nan
-                else:
-                    stillhasvalue = True
-                    new_layer_brt[i, k, :] = brt_chunk[i + bzs_idx_start][k][l]
-        if not stillhasvalue:
-            break
-        brt_tensor.append(new_layer_brt)
-        l += 1
-    brt_tensor = np.array(brt_tensor)
-    brt_tensor = np.moveaxis(brt_tensor, 0, 2)
-    brt_tensor = np.expand_dims(brt_tensor, axis=1) # insert Phi dimension
     # BRT-Tensor = {z, phi(length=1), gamma, brt states array, x(length=5))}
-    st3 = time.time()
+    brt_tensor = brt_tensor[bzs_idx_start:bzs_idx_end+1, ...]
+    robot_tensor = np.expand_dims(robot_phi_gamma_velos_naive[rzs_idx_start: rzs_idx_end+1, ...], axis=3)
+    st1 = time.time()
 
-    validate = np.argwhere(np.expand_dims(robot_phi_gamma_velos_naive, axis=3) - thres - brt_tensor[:, :, :, :, 4] > 0)
+    validate = np.argwhere(robot_tensor - thres - brt_tensor[:, :, :, :, 4] > 0)
     # validate: z, phi, gamma, idx_of_brt
 
     q_indice = validate[:, :3]
@@ -172,9 +162,8 @@ def brt_chunk_robot_data_matching(z_target_to_base, robot_path, brt_path, thres=
     ct = time.time()
     print("Given query z=", "{0:0.2f}".format(z_target_to_base), ", found", len(q_candidates),
           "initial guesses in", "{0:0.2f}".format(1000 * (ct - st)), "ms",
-          "\n\tdata loading takes {0:0.2f}, remains {1:0.2f} ms".format(1000 * (st0 - st), 1000 * (ct - st0)),
-          "\n\tcore operation takes {0:0.2f}".format(1000 * (ct - st3)), "ms",
-          "\n\tgeneration of the BRT tensor takes {0:0.2f}".format(1000 * (st3 - st2)), "ms",)
+          "\n\tcore operation takes {0:0.2f}".format(1000 * (ct - st1)), "ms",
+          "\n\talignment takes {0:0.2f}".format(1000 * (st1 - st)), "ms",)
 
     return q_candidates, phi_candidates, x_candidates
 

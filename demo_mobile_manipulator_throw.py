@@ -109,7 +109,6 @@ def load_data(robot_path, brt_path):
     num_gammas = robot_phi_gamma_q_idxs_naive.shape[2]
 
     brt_zs = np.load(brt_path + '/brt_zs.npy')
-
     brt_tensor = np.load(brt_path + '/brt_tensor.npy')
     ct = time.time()
     print("Loading cost {0:0.2f} ms".format(1000 * (ct - st)))
@@ -162,8 +161,7 @@ def brt_chunk_robot_data_matching(z_target_to_base, thres=0.1):
     ct = time.time()
     print("Given query z=", "{0:0.2f}".format(z_target_to_base), ", found", len(q_candidates),
           "initial guesses in", "{0:0.2f}".format(1000 * (ct - st)), "ms",
-          "\n\tcore operation takes {0:0.2f}".format(1000 * (ct - st1)), "ms",
-          "\n\talignment takes {0:0.2f}".format(1000 * (st1 - st)), "ms",)
+          "\n\tcore operation takes {0:0.2f}".format(1000 * (ct - st1)), "ms")
 
     return q_candidates, phi_candidates, x_candidates
 

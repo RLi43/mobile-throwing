@@ -42,36 +42,36 @@ def main(box_position):
     load_data(robot_path, experiment_path)
     # get initial guess
     q_candidates,phi_candidates,throw_candidates = brt_chunk_robot_data_matching(z)
-    q_candidates = np.array(q_candidates)
-    phi_candidates = np.array(phi_candidates)
-    throw_candidates = np.array(throw_candidates)
 
     n_candidates = q_candidates.shape[0]
 
-    # get full throwing configuration and trajectories
-    traj_durations = []
-    trajs = []
-    throw_configs = []
-    st = time.time()
-    for i in range(n_candidates):
-        candidate_idx = i
-        throw_config_full = get_full_throwing_config(robot, q_candidates[candidate_idx],
-                                                     phi_candidates[candidate_idx],
-                                                     throw_candidates[candidate_idx])
-        # filter out throwing configuration that will hit gripper palm
-        if throw_config_full[4][2] < -0.02:
-            continue
-        # calculate throwing trajectory
-        traj_throw = get_traj_from_ruckig(q0=q0, q0_dot=q0_dot,
-                                          qd=throw_config_full[0], qd_dot=throw_config_full[3],
-                                          base0=base0, based =-throw_config_full[-1][:-1])
-        traj_durations.append(traj_throw.duration)
-        trajs.append(traj_throw)
-        throw_configs.append(throw_config_full)
-
-    print("Given query z=", "{0:0.2f}".format(z), ", found", len(throw_configs),
-          "good throws in", "{0:0.2f}".format(1000 * (time.time() - st)), "ms")
     if TRAJ_GEN:
+        # get full throwing configuration and trajectories
+        traj_durations = []
+        trajs = []
+        throw_configs = []
+        st = time.time()
+        for i in range(n_candidates):
+            candidate_idx = i
+            throw_config_full = get_full_throwing_config(robot, q_candidates[candidate_idx],
+                                                         phi_candidates[candidate_idx],
+                                                         throw_candidates[candidate_idx])
+            # filter out throwing configuration that will hit gripper palm
+            if throw_config_full[4][2] < -0.02:
+                continue
+            # calculate throwing trajectory
+            traj_throw = get_traj_from_ruckig(q0=q0, q0_dot=q0_dot,
+                                              qd=throw_config_full[0], qd_dot=throw_config_full[3],
+                                              base0=base0, based =-throw_config_full[-1][:-1])
+            if traj_throw.duration < 1e-10:  # unknown error
+                continue
+            traj_durations.append(traj_throw.duration)
+            trajs.append(traj_throw)
+            throw_configs.append(throw_config_full)
+
+        print("Given query z=", "{0:0.2f}".format(z), ", found", len(throw_configs),
+              "good throws in", "{0:0.2f}".format(1000 * (time.time() - st)), "ms")
+
         # select the minimum-time trajectory to simulate
         selected_idx = np.argmin(traj_durations)
         traj_throw = trajs[selected_idx]
@@ -87,29 +87,122 @@ def main(box_position):
         p.disconnect()
 
         print("box_position: ", throw_config_full[-1])
-        print("throwing range: ", "{0:0.2f}".format(-throw_candidates[selected_idx, 0]),
-              "throwing height", "{0:0.2f}".format(throw_candidates[selected_idx, 1]))
+        print("throwing range: ", "{0:0.2f}".format(-throw_config_full[2][0]),
+              "throwing height", "{0:0.2f}".format(throw_config_full[2][1]))
     if ANIMATE:
         video_path=experiment_path+"/moving_base/throw"+ str(int(1000*z))+".mp4"
         throw_simulation_mobile(traj_throw, throw_config_full, g) #, video_path=video_path)
 
+from bisect import bisect_left
+def insert_idx(a, x):
+    """
 
-phis, robot_zs, brt_zs, num_gammas = None, None, None, None
+    :param a: sorted array, ascending
+    :param x: element
+    :return: the idx of the closest value to x
+    """
+    idx = bisect_left(a, x)
+    if idx == 0:
+        return idx
+    elif idx == len(a):
+        return idx - 1
+    else:
+        if (x - a[idx - 1]) < (a[idx] - x):
+            return idx - 1
+        else:
+            return idx
+
+robot_phis, robot_zs, brt_zs, num_gammas = None, None, None, None
 mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor = None, None, None, None
-def load_data(robot_path, brt_path):
-    # TODO: Convert BRT state points to tensor
-    global phis, robot_zs, brt_zs, num_gammas, mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor
+def load_data(robot_path, brt_path, brt_tensor_name = None, brt_zs_name = None):
+    global robot_phis, robot_zs, brt_zs, num_gammas, mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor
     st = time.time()
-    phis = np.linspace(-90, 90, 13)
+
+    # load data - robot
     # robot_zs = np.load(robot_path + '/robot_zs.npy')
     robot_zs = np.arange(start=0.0, stop=1.10+0.01, step=0.05)
+    # robot_gamma = np.load(robot_path + '/robot_gamma.npy')
+    robot_gamma = np.arange(start=20.0, stop=70.0+0.01, step=5.0)
+    robot_gamma *= np.pi/180.0
+    # robot_phis = np.load(robot_path + '/robot_phis.npy')
+    robot_phis = np.linspace(-90, 90, 13)
     mesh = np.load(robot_path+'/qs.npy')
     robot_phi_gamma_velos_naive = np.load(robot_path + '/phi_gamma_velos_naive.npy')
     robot_phi_gamma_q_idxs_naive = np.load(robot_path + '/phi_gamma_q_idxs_naive.npy')
     num_gammas = robot_phi_gamma_q_idxs_naive.shape[2]
 
-    brt_zs = np.load(brt_path + '/brt_zs.npy')
-    brt_tensor = np.load(brt_path + '/brt_tensor.npy')
+    ct1 = time.time()
+    print("Loading robot data cost {0:0.2f} ms".format(1000 * (ct1 - st)))
+    # load data - brt
+    if brt_tensor_name is not None and brt_zs_name is not None:
+        brt_tensor = np.load(brt_path + brt_tensor_name)
+        brt_zs = np.load(brt_path + brt_zs_name)
+    else:
+        # generate tensor from raw data
+        brt_data = np.load(brt_path + '/brt_data.npy')
+
+        # generate zs align to robot zs
+        step_robot_zs = 0.05 # TODO
+        bzstart = min(robot_zs) - step_robot_zs * np.ceil((min(robot_zs) - min(brt_data[:, 1]))/step_robot_zs)
+        brt_zs = np.arange(start=bzstart, stop=max(brt_data[:, 1])+0.01, step=step_robot_zs)
+        num_zs = brt_zs.shape[0]
+        num_gammas = len(robot_gamma)
+
+        brt_chunk = [[[] for j in range(num_gammas)] for i in range(num_zs)]
+        states_num = 0
+        for x in brt_data:
+            z = x[1]
+            gamma = np.arctan2(x[3], x[2])
+            # drop some states
+            # consider the maximum velocity robot can archive
+            if gamma < min(robot_gamma) or gamma > max(robot_gamma):
+                continue
+            v = np.sqrt(x[2] ** 2 + x[3] ** 2)
+            z_idx = insert_idx(brt_zs, z)
+            ga_idx = insert_idx(robot_gamma, gamma)
+            brt_chunk[z_idx][ga_idx].append(list(x) + [v])
+            states_num += 1
+        # delete empty chunks
+        remove_i = 0
+        while True:
+            chunk = brt_chunk[remove_i]
+            empty = True
+            for j in range(num_gammas):
+                if len(chunk[j]) > 0:
+                    empty = False
+                    break
+            if not empty:
+                break
+            remove_i += 1
+        brt_chunk = brt_chunk[remove_i:]
+        brt_zs = brt_zs[remove_i:, ...]
+        num_zs -= remove_i
+
+        brt_tensor = []
+        l = 0
+        while True:
+            new_layer_brt = np.ones((num_zs, num_gammas, 5))
+            stillhasvalue = False
+            for i in range(num_zs):
+                for k in range(num_gammas):
+                    if len(brt_chunk[i][k]) < l + 1:
+                        new_layer_brt[i, k, :] = np.nan
+                    else:
+                        stillhasvalue = True
+                        new_layer_brt[i, k, :] = brt_chunk[i][k][l]
+            if not stillhasvalue:
+                break
+            brt_tensor.append(new_layer_brt)
+            l += 1
+        brt_tensor = np.array(brt_tensor)
+        brt_tensor = np.moveaxis(brt_tensor, 0, 2)
+        brt_tensor = np.expand_dims(brt_tensor, axis=1)  # insert Phi dimension
+        print("Tensor Size: {0} with {1} states( occupation rate {2:0.1f}%)".format(
+            brt_tensor.shape, states_num, 100 * states_num * 5.0 / (np.prod(brt_tensor.shape))))
+
+        ct2 = time.time()
+        print("Generating brt tensor cost {0:0.2f} ms".format(1000 * (ct2 - ct1)))
+
     ct = time.time()
     print("Loading cost {0:0.2f} ms".format(1000 * (ct - st)))
 
@@ -123,7 +216,7 @@ def brt_chunk_robot_data_matching(z_target_to_base, thres=0.1):
     """
     # Given target position, find out initial guesses of (q, phi, x), that is to be feed to Ruckig
 
-    global phis, robot_zs, brt_zs, num_gammas, mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor
+    global robot_phis, robot_zs, brt_zs, num_gammas, mesh, robot_phi_gamma_velos_naive, robot_phi_gamma_q_idxs_naive, brt_tensor
     st = time.time()
 
     # align the z idx
@@ -140,7 +233,7 @@ def brt_chunk_robot_data_matching(z_target_to_base, thres=0.1):
         rzs_idx_end = num_robot_zs - 1
         bzs_idx_end = num_brt_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs)) / 0.05)
     else:
-        rzs_idx_end = num_robot_zs - 1 - round((z_target_to_base + brt_z_max - max(robot_zs)) / 0.05)
+        rzs_idx_end = num_robot_zs - 1 + round((z_target_to_base + brt_z_max - max(robot_zs)) / 0.05)
         bzs_idx_end = num_brt_zs - 1
     assert bzs_idx_end - bzs_idx_start == rzs_idx_end - rzs_idx_start
     # z_num = bzs_idx_end - bzs_idx_start + 1
@@ -156,7 +249,7 @@ def brt_chunk_robot_data_matching(z_target_to_base, thres=0.1):
     q_indice = validate[:, :3]
     q_indice[:, 0] += rzs_idx_start
     q_candidates = mesh[robot_phi_gamma_q_idxs_naive[tuple(q_indice.T)].astype(int), :]
-    phi_candidates = phis[validate[:, 1]]
+    phi_candidates = robot_phis[validate[:, 1]]
     x_candidates = brt_tensor[:, 0, :, :, :][tuple(np.r_['-1', validate[:, :1], validate[:, 2:4]].T)][:, :4]
     ct = time.time()
     print("Given query z=", "{0:0.2f}".format(z_target_to_base), ", found", len(q_candidates),

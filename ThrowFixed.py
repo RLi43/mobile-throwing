@@ -27,7 +27,8 @@ class ThrowFixed():
         self.robot_path = robot_path
         self.brt_path = brt_path
         self.g = gravity
-
+        self.GAMMA_TOLERANCE = 0.5/180.0*np.pi  # 0.5 degree
+        self.Z_TOLERANCE = 0.01  # 1cm
         clid = pybullet.connect(pybullet.DIRECT)
         pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())  # optionally
         self.robot = pybullet.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True,
@@ -38,11 +39,11 @@ class ThrowFixed():
         q_candidates, phi_candidates, x_candidates = self.brt_robot_data_matching(box_position)
         if len(q_candidates) == 0:
             print("No result found")
-            return
+            return 0
         trajs, throw_configs = self.generate_throw_config(q_candidates, phi_candidates, x_candidates, base0)
         if len(trajs) == 0:
             print("No trajectory found")
-            return
+            return 0
 
         # select the minimum-time trajectory to simulate
         traj_durations = [traj.duration for traj in trajs]
@@ -57,6 +58,7 @@ class ThrowFixed():
         if animate:
             pybullet.disconnect()
             self.throw_simulation_mobile(traj_throw, throw_config_full, self.g, video_path=video_path)
+        return len(trajs)
 
     def load_data(self, brt_tensor_name=None, brt_zs_name=None):
         st = time.time()
@@ -122,6 +124,8 @@ class ThrowFixed():
 
             brt_chunk = [[[] for j in range(self.num_gammas)] for i in range(num_zs)]
             states_num = 0
+            pad_gamma = np.r_[-np.inf, self.robot_gamma]
+            pad_zs = np.r_[-np.inf, brt_zs]
             for x in brt_data:
                 z = x[1]
                 gamma = np.arctan2(x[3], x[2])
@@ -130,9 +134,13 @@ class ThrowFixed():
                 if gamma < min(self.robot_gamma) or gamma > max(self.robot_gamma):
                     continue
                 v = np.sqrt(x[2] ** 2 + x[3] ** 2)
-                z_idx = insert_idx(brt_zs, z)
-                ga_idx = insert_idx(self.robot_gamma, gamma)
-                brt_chunk[z_idx][ga_idx].append(list(x) + [v])
+                # if v > max: continue
+                # argmax will be faster than where
+                gi = np.argmax(abs(pad_gamma - gamma) < self.GAMMA_TOLERANCE)
+                if gi == 0: continue
+                zi = np.argmax(abs(pad_zs - z) < self.Z_TOLERANCE)
+                if zi == 0: continue
+                brt_chunk[zi-1][gi-1].append(list(x) + [v])
                 states_num += 1
             # delete empty chunks
             remove_i = 0
@@ -209,7 +217,9 @@ class ThrowFixed():
             bzs_idx_end = num_brt_zs - 1
         assert bzs_idx_end - bzs_idx_start == rzs_idx_end - rzs_idx_start, \
             "bzs: {0}, {1}; rzs: {2}, {3}".format(bzs_idx_start, bzs_idx_end, rzs_idx_start, rzs_idx_end)
-        # z_num = bzs_idx_end - bzs_idx_start + 1
+        z_num = bzs_idx_end - bzs_idx_start + 1
+        if z_num == 0 or rzs_idx_end <= 0:
+            return [], [], []
 
         # BRT-Tensor = {z, phi(length=1), gamma, brt states array, x(length=5))}
         brt_tensor = self.brt_tensor[bzs_idx_start:bzs_idx_end + 1, ...]

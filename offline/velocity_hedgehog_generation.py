@@ -33,48 +33,52 @@ class Robot:
     def forward(self, q: list) -> (np.ndarray, np.ndarray):
         pybullet.resetJointStatesMultiDof(self.robot, list(range(7)), [[qi] for qi in q])
         AE = np.array(pybullet.getLinkState(self.robot, 11)[0])
-        Jl, Ja = pybullet.calculateJacobian(self.robot, 11, [0, 0, 0], q + [0.1, 0.1], [0.0] * 9, [0.0] * 9)
+        Jl, Ja = pybullet.calculateJacobian(self.robot, 11, [0, 0, 0], list(q) + [0.1, 0.1], [0.0] * 9, [0.0] * 9)
         J = np.vstack((Jl, Ja))
         J = J[:, :7]
         return AE, J
 
 
-def main(robot: Robot, delta_q, Z, Phi, Gamma, svthres=0.1):
+def main(robot: Robot, delta_q, Dis, Z, Phi, Gamma, svthres=0.1):
     num_joint = robot.q_min.shape[0]
     # Build robot dataset
+    # The first joint and the last joint don't contribute to the pose
     q_candidates = computeMesh(robot.q_min[1:6], robot.q_max[1:6], delta_q)
     print("q size:", q_candidates.shape)
     # Filter out q with small singular value
     X = filterBySingularValue(q_candidates, robot, svthres)
-    # Group data by Z
-    Xz = groupBy(X, Z)
+    # Group data by Z and AE
+    Xzd = groupBy(X, Z, Dis)
     # Initialize velocity hedgehog
     num_z = Z.shape[0]
+    num_ae = Dis.shape[0]
     num_phi = Phi.shape[0]
     num_gamma = Gamma.shape[0]
-    vel_max = np.zeros((num_z, num_phi, num_gamma))
-    argmax_q = np.zeros((num_z, num_phi, num_gamma, num_joint))
+    vel_max = np.zeros((num_z, num_ae, num_phi, num_gamma))
+    argmax_q = np.zeros((num_z, num_ae, num_phi, num_gamma, num_joint))
 
     # Build velocity hedgehog
     for i in range(Z.shape[0]):
-        qz = getqat(i, Xz)
-        print("height", Z[i], "Num(q):", len(qz))
-        if len(qz) == 0:
-            continue
-        st = time.time()
-        vels = np.zeros((len(qz), num_phi, num_gamma))
-        for d, q in enumerate(qz):
-            AE, J = robot.forward(q[:7])
-            fracyx = AE[1]/AE[0]
-            Jinv = np.linalg.pinv(J[:3, :])
-            qdmin, qdmax = robot.q_dot_min, robot.q_dot_max
-            vels[d, :, :] = np.array([[LP(phi, gamma, Jinv, fracyx, qdmin, qdmax) for gamma in Gamma] for phi in Phi])
+        for j in range(Dis.shape[0]):
+            qzd = Xzd[i][j]
+            if len(qzd) == 0:
+                continue
+            print("height", Z[i], " AE", Dis[j], " Num(q):", len(qzd))
 
-        vel_max[i, :, :] = np.max(vels, axis=0)
-        argmax_q[i, :, :] = np.array(qz)[np.argmax(vels, axis=0), :7]
+            st = time.time()
+            vels = np.zeros((len(qzd), num_phi, num_gamma))
+            for k, q in enumerate(qzd):
+                AE, J = robot.forward(q[:7])
+                fracyx = AE[1]/AE[0]
+                Jinv = np.linalg.pinv(J[:3, :])
+                qdmin, qdmax = robot.q_dot_min, robot.q_dot_max
+                vels[k, :, :] = np.array([[LP(phi, gamma, Jinv, fracyx, qdmin, qdmax) for gamma in Gamma] for phi in Phi])
 
-        timecost = time.time() - st
-        print("use {0:.2f}s for {1} q, {2:.3f} s per q".format(timecost, len(qz), timecost/len(qz)))
+            vel_max[i, :, :] = np.max(vels, axis=0)
+            argmax_q[i, :, :] = np.array(qzd)[np.argmax(vels, axis=0), :7]
+
+            timecost = time.time() - st
+            print("use {0:.2f}s for {1} q, {2:.3f} s per q".format(timecost, len(qzd), timecost/len(qzd)))
     return vel_max, argmax_q
 
 
@@ -96,35 +100,35 @@ def filterBySingularValue(Q, robot: Robot, thres):
         if np.min(s) < thres:
             continue
         ret.append(AE.tolist() + q)
-    return ret
+    return np.array(ret)
 
-
-from bisect import bisect_left
-
-
-def groupBy(X, ZList):
+def insert_idx(a, v):
+    idl = np.searchsorted(a, v)  # left
+    if idl == 0:
+        return idl
+    if idl == len(a):
+        return idl-1
+    if (a[idl] - v) < (v - a[idl-1]):
+        return idl
+    return idl-1
+def groupBy(X, ZList, AEList):
     """
 
     :param X:
     :param ZList:
+    :param AEList:
     :return:
-    note: Z supposed to be sorted ascending
+    note: Z and AE supposed to be sorted ascending
     """
     zlen = ZList.shape[0]
-    Xz = [[] for i in range(zlen)]
-    for x in X:
-        bi = bisect_left(ZList, x[2])
-        if bi >= zlen:
-            bi = zlen - 1
-        elif bi > 0 and (x[2] - ZList[bi - 1]) < (ZList[bi] - x[2]):
-            bi -= 1
-        # TODO bi == 0 -> smaller than min_z?
-        Xz[bi].append(x)
-    return Xz
-
-
-def getqat(i, Xz):
-    return Xz[i]
+    aelen = AEList.shape[0]
+    ae = np.linalg.norm(X[:, :2], axis=1)
+    Xzd = [[[] for j in range(aelen)] for i in range(zlen)]
+    for i, x in enumerate(X):
+        zi = insert_idx(ZList, x[2])
+        aei = insert_idx(AEList, ae[i])
+        Xzd[zi][aei].append(x)
+    return Xzd
 
 
 import cvxpy as cp
@@ -181,9 +185,10 @@ if __name__ == "__main__":
     # print(computeMesh(pandas.q_min[1:6], pandas.q_max[1:6], 0.2))
 
     Z = np.arange(0, 1.2, 0.05)
+    Dis = np.arange(0, 1.1, 0.05)
     Phi = np.arange(-np.pi / 2, np.pi / 2, np.pi / 4)  # np.pi / 12
     Gamma = np.arange(np.pi / 6, np.pi / 3, np.pi / 12)  # np.pi / 36
-    vel_max, argmax_q = main(robot=pandas, delta_q=0.8, Z=Z, Phi=Phi, Gamma=Gamma)
+    vel_max, argmax_q = main(robot=pandas, delta_q=0.8, Z=Z, Dis=Dis, Phi=Phi, Gamma=Gamma)
     np.save("vel_max", vel_max)
     np.save("argmax_q", argmax_q)
     print(vel_max.shape)

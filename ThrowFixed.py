@@ -2,6 +2,7 @@ import argparse
 import time
 import math
 import numpy as np
+import sparse
 import pybullet
 import pybullet_data
 
@@ -178,10 +179,12 @@ class ThrowFixed():
             brt_tensor = np.array(brt_tensor)
             brt_tensor = np.moveaxis(brt_tensor, 0, 2)
             self.brt_tensor = np.expand_dims(brt_tensor, axis=1)  # insert Phi dimension
+            self.brt_tensor = sparse.COO(self.brt_tensor, fill_value=np.nan)
+            print(self.brt_tensor)
 
             ct2 = time.time()
             print("Tensor Size: {0} with {1} states( occupation rate {2:0.1f}%)".format(
-                brt_tensor.shape, states_num, 100 * states_num * 5.0 / (np.prod(brt_tensor.shape))))
+                self.brt_tensor.shape, states_num, 100 * states_num * 5.0 / (np.prod(brt_tensor.shape))))
             print("Generating brt tensor cost {0:0.2f} ms".format(1000 * (ct2 - ct1)))
 
         ct = time.time()
@@ -235,14 +238,16 @@ class ThrowFixed():
         robot_phis = np.expand_dims(robot_phis, axis=1)
         mask_phi = np.abs(phis[rzs_idx_start: rzs_idx_end + 1, ...] - robot_phis) < thres_phi
         mask_phi_tensor = np.expand_dims(mask_phi, axis=3)
+        mask_phi_tensor = sparse.COO(mask_phi_tensor, fill_value=False)
+        print(mask_phi_tensor)
 
         dis = np.linalg.norm(EB, axis=-1)
         robot_tensor_r = np.expand_dims(dis[rzs_idx_start: rzs_idx_end + 1, ...], axis=3)
         st1 = time.time()
 
-        validate = np.argwhere((robot_tensor_v - thres_v - brt_tensor[:, :, :, :, 4] > 0)  # velocity satisfy
-                               * (robot_tensor_r < -brt_tensor[:, :, :, :, 0] + thres_dis)  # distance
-                               * (robot_tensor_r > -brt_tensor[:, :, :, :, 0] - thres_dis)
+        validate = np.argwhere((robot_tensor_v - thres_v > brt_tensor[:, :, :, :, 4])  # velocity satisfy
+                               * (brt_tensor[:, :, :, :, 0] < thres_dis - robot_tensor_r)  # distance
+                               * (brt_tensor[:, :, :, :, 0] > -robot_tensor_r - thres_dis)
                                * mask_phi_tensor
                                )
                             # TODO: re-compute BRT states that

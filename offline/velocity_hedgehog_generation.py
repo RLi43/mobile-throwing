@@ -38,6 +38,14 @@ class Robot:
         J = J[:, :7]
         return AE, J
 
+    def forward_l(self, q: list) -> (np.ndarray, np.ndarray):
+        pybullet.resetJointStatesMultiDof(self.robot, list(range(7)), [[qi] for qi in q])
+        AE = np.array(pybullet.getLinkState(self.robot, 11)[0])
+        Jl, Ja = pybullet.calculateJacobian(self.robot, 11, [0, 0, 0], q + [0.1, 0.1], [0.0] * 9, [0.0] * 9)
+        J = np.array(Jl)
+        J = J[:, :7]
+        return AE, J
+
 
 def main(robot: Robot, delta_q, Dis, Z, Phi, Gamma, svthres=0.1):
     num_joint = robot.q_min.shape[0]
@@ -102,33 +110,28 @@ def filterBySingularValue(Q, robot: Robot, thres):
         ret.append(AE.tolist() + q)
     return np.array(ret)
 
-def insert_idx(a, v):
-    idl = np.searchsorted(a, v)  # left
-    if idl == 0:
-        return idl
-    if idl == len(a):
-        return idl-1
-    if (a[idl] - v) < (v - a[idl-1]):
-        return idl
-    return idl-1
-def groupBy(X, ZList, AEList):
+def groupBy(X, ZList, AEList, Z_TOLERANCE=0.05, DIS_TOLERANCE=0.05):
     """
 
     :param X:
     :param ZList:
-    :param AEList:
     :return:
-    note: Z and AE supposed to be sorted ascending
+    note: Z supposed to be sorted ascending
     """
     zlen = ZList.shape[0]
-    aelen = AEList.shape[0]
-    ae = np.linalg.norm(X[:, :2], axis=1)
-    Xzd = [[[] for j in range(aelen)] for i in range(zlen)]
-    for i, x in enumerate(X):
-        zi = insert_idx(ZList, x[2])
-        aei = insert_idx(AEList, ae[i])
-        Xzd[zi][aei].append(x)
+    pad_zs = np.r_[-np.inf, ZList]
+    pad_dis = np.r_[-np.inf, AEList]
+    Xzd = [[[] for j in range(AEList.shape[0])] for i in range(zlen)]
+    for x in X:
+        zi = np.argmax(abs(pad_zs - x[2]) < Z_TOLERANCE)
+        di = np.argmax(abs(pad_dis - np.linalg.norm(x[:2])) < DIS_TOLERANCE)
+        if zi != 0 and di != 0:
+            Xzd[zi - 1][di - 1].append(x)
     return Xzd
+
+
+def getqat(i, Xz):
+    return Xz[i]
 
 
 import cvxpy as cp
@@ -154,7 +157,7 @@ def LP(phi, gamma, Jinv, fracyx, qdmin, qdmax):
                    v == s * np.array(
                        [np.cos(gamma) * np.cos(fracyx + phi), np.cos(gamma) * np.sin(fracyx + phi), np.sin(gamma)])]
     prob = cp.Problem(objective, constraints)
-    result = prob.solve()
+    result = prob.solve(warm_start=True)
     return s.value[0]
 
 
@@ -186,10 +189,40 @@ if __name__ == "__main__":
 
     Z = np.arange(0, 1.2, 0.05)
     Dis = np.arange(0, 1.1, 0.05)
-    Phi = np.arange(-np.pi / 2, np.pi / 2, np.pi / 4)  # np.pi / 12
-    Gamma = np.arange(np.pi / 6, np.pi / 3, np.pi / 12)  # np.pi / 36
-    vel_max, argmax_q = main(robot=pandas, delta_q=0.8, Z=Z, Dis=Dis, Phi=Phi, Gamma=Gamma)
-    np.save("vel_max", vel_max)
-    np.save("argmax_q", argmax_q)
+    Phi = np.arange(-np.pi / 2, np.pi / 2, np.pi / 12)  # np.pi / 12
+    Gamma = np.arange(np.pi / 9, np.pi * 7 / 18, np.pi / 36)  # np.pi / 36
+    # delta_q = 0.2  # 4601952
+    # delta_q = 0.3  # 686400
+    # delta_q = 0.4  # 162000
+    delta_q = 0.5  # 162000
+    vel_max, argmax_q = main(robot=pandas, delta_q=delta_q, Z=Z, Phi=Phi, Gamma=Gamma)
+    np.save("my_vel_max", vel_max)
+    np.save("my_argmax_q", argmax_q)
     print(vel_max.shape)
     print(argmax_q.shape)
+
+    # construct q_idx and qs
+    print("Constructing q_idx")
+    num_z, num_dis, num_phi, num_gamma = len(Z), len(Dis), len(Phi), len(Gamma)
+    qs = []
+    qid_iter = 0
+    q_idxs = np.zeros((num_z, num_dis, num_phi, num_gamma))
+    for i in range(num_z):
+        for j in range(num_dis):
+            for k in range(num_phi):
+                for l in range(num_gamma):
+                    q = argmax_q[i, j, k, l, :]
+                    exist = False
+                    for d, qi in enumerate(qs):
+                        if np.allclose(qi, q):
+                            qid = d
+                            exist = True
+                            break
+                    if not exist:
+                        qid = qid_iter
+                        qid_iter += 1
+                        qs.append(q)
+                    q_idxs[i, j, k, l] = qid
+    np.save('my_qs', np.array(qs))
+    np.save('my_q_idxs', q_idxs)
+    print("Done.")

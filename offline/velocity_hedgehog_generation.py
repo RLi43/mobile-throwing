@@ -71,13 +71,13 @@ def main(robot: Robot, delta_q, Dis, Z, Phi, Gamma, svthres=0.1):
             qzd = Xzd[i][j]
             if len(qzd) == 0:
                 continue
-            print("height", Z[i], " AE", Dis[j], " Num(q):", len(qzd))
+            print("height: {:.2f}, AE: {:.2f}, Num(q): {}".format(Z[i], Dis[j], len(qzd)))
 
             st = time.time()
             vels = np.zeros((len(qzd), num_phi, num_gamma))
             for k, q in enumerate(qzd):
                 AE, J = robot.forward(q[:7])
-                fracyx = AE[1]/AE[0]
+                fracyx = AE[1] / AE[0]
                 Jinv = np.linalg.pinv(J[:3, :])
                 qdmin, qdmax = robot.q_dot_min, robot.q_dot_max
                 vels[k, :, :] = np.array([[LP(phi, gamma, Jinv, fracyx, qdmin, qdmax) for gamma in Gamma] for phi in Phi])
@@ -122,11 +122,14 @@ def groupBy(X, ZList, AEList, Z_TOLERANCE=0.05, DIS_TOLERANCE=0.05):
     pad_zs = np.r_[-np.inf, ZList]
     pad_dis = np.r_[-np.inf, AEList]
     Xzd = [[[] for j in range(AEList.shape[0])] for i in range(zlen)]
+    num = 0
     for x in X:
         zi = np.argmax(abs(pad_zs - x[2]) < Z_TOLERANCE)
         di = np.argmax(abs(pad_dis - np.linalg.norm(x[:2])) < DIS_TOLERANCE)
         if zi != 0 and di != 0:
             Xzd[zi - 1][di - 1].append(x)
+            num += 1
+    print("total num:", num)
     return Xzd
 
 
@@ -193,9 +196,9 @@ if __name__ == "__main__":
     Gamma = np.arange(np.pi / 9, np.pi * 7 / 18, np.pi / 36)  # np.pi / 36
     # delta_q = 0.2  # 4601952
     # delta_q = 0.3  # 686400
-    # delta_q = 0.4  # 162000
-    delta_q = 0.5  # 162000
-    vel_max, argmax_q = main(robot=pandas, delta_q=delta_q, Z=Z, Phi=Phi, Gamma=Gamma)
+    delta_q = 0.4  # 162000
+    # delta_q = 0.5  # 64512
+    vel_max, argmax_q = main(robot=pandas, delta_q=delta_q, Z=Z, Dis=Dis, Phi=Phi, Gamma=Gamma)
     np.save("my_vel_max", vel_max)
     np.save("my_argmax_q", argmax_q)
     print(vel_max.shape)

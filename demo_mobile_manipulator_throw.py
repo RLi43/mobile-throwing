@@ -15,8 +15,8 @@ from ruckig import InputParameter, Ruckig, Trajectory, Result
 build_path = Path(__file__).parent.absolute().parent / 'build'
 path.insert(0, str(build_path))
 
-TRAJ_GEN = False
-ANIMATE = False
+TRAJ_GEN = True
+ANIMATE = True
 
 def main(box_position):
     # Height of target box relative to panda base, [-0.5, 0.9] is good
@@ -119,16 +119,24 @@ def load_data(robot_path, brt_path, brt_tensor_name = None, brt_zs_name = None):
     st = time.time()
 
     # load data - robot
-    # robot_zs = np.load(robot_path + '/robot_zs.npy')
-    robot_zs = np.arange(start=0.0, stop=1.10+0.01, step=0.05)
-    # robot_gamma = np.load(robot_path + '/robot_gamma.npy')
-    robot_gamma = np.arange(start=20.0, stop=70.0+0.01, step=5.0)
-    robot_gamma *= np.pi/180.0
-    # robot_phis = np.load(robot_path + '/robot_phis.npy')
-    robot_phis = np.linspace(-90, 90, 13)
-    mesh = np.load(robot_path+'/qs.npy')
-    robot_phi_gamma_velos_naive = np.load(robot_path + '/phi_gamma_velos_naive.npy')
-    robot_phi_gamma_q_idxs_naive = np.load(robot_path + '/phi_gamma_q_idxs_naive.npy')
+    # # robot_zs = np.load(robot_path + '/robot_zs.npy')
+    # robot_zs = np.arange(start=0.0, stop=1.10+0.01, step=0.05)
+    # # robot_gamma = np.load(robot_path + '/robot_gamma.npy')
+    # robot_gamma = np.arange(start=20.0, stop=70.0+0.01, step=5.0)
+    # robot_gamma *= np.pi/180.0
+    # # robot_phis = np.load(robot_path + '/robot_phis.npy')
+    # robot_phis = np.linspace(-90, 90, 13)
+    # mesh = np.load(robot_path+'/qs.npy')
+    # robot_phi_gamma_velos_naive = np.load(robot_path + '/phi_gamma_velos_naive.npy')
+    # robot_phi_gamma_q_idxs_naive = np.load(robot_path + '/phi_gamma_q_idxs_naive.npy')
+    # num_gammas = robot_phi_gamma_q_idxs_naive.shape[2]
+
+    robot_zs = np.arange(0, 1.2, 0.05)
+    robot_gamma = np.arange(np.pi / 9, np.pi * 7 / 18, np.pi / 36)
+    robot_phis = np.arange(-np.pi / 2, np.pi / 2, np.pi / 12)
+    mesh = np.load('offline/my_qs.npy')
+    robot_phi_gamma_velos_naive = np.load('offline/my_vel_max.npy')
+    robot_phi_gamma_q_idxs_naive = np.load('offline/my_q_idxs.npy')
     num_gammas = robot_phi_gamma_q_idxs_naive.shape[2]
 
     ct1 = time.time()

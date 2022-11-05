@@ -27,7 +27,7 @@ class ThrowFixed():
         self.robot_path = robot_path
         self.brt_path = brt_path
         self.g = gravity
-        self.GAMMA_TOLERANCE = 0.5/180.0*np.pi  # 0.5 degree
+        self.GAMMA_TOLERANCE = 0.2/180.0*np.pi  # 0.2 degree
         self.Z_TOLERANCE = 0.01  # 1cm
         clid = pybullet.connect(pybullet.DIRECT)
         pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())  # optionally
@@ -51,8 +51,9 @@ class ThrowFixed():
         traj_throw = trajs[selected_idx]
         throw_config_full = throw_configs[selected_idx]
 
-        print("box_position: ", throw_config_full[-1])
-        print("deviation: ", throw_config_full[-1] - box_position)
+        print("box_position: ", box_position)
+        print("AB          : ", throw_config_full[-1])
+        print("deviation   : ", throw_config_full[-1] - box_position)
         print("\n\tthrowing range: {0:0.2f}".format(-throw_config_full[2][0]),
               "\n\tthrowing height: {0:0.2f}".format(throw_config_full[2][1]))
         if animate:
@@ -65,19 +66,20 @@ class ThrowFixed():
 
         # load data - robot
         # TODO: data files
-        # robot_zs = np.load(robot_path + '/robot_zs.npy')
-        self.robot_zs = np.arange(start=0.0, stop=1.10 + 0.01, step=0.05)
-        # robot_gamma = np.load(robot_path + '/robot_gamma.npy')
-        self.robot_gamma = np.arange(start=20.0, stop=70.0 + 0.01, step=5.0)
-        self.robot_gamma *= np.pi / 180.0
+        self.robot_zs = np.load(self.robot_path + '/robot_zs.npy')
+        # self.robot_zs = np.arange(0, 1.2, 0.05)
+        self.robot_dis = np.load(self.robot_path + '/robot_diss.npy')
+        # self.robot_dis = np.arange(0, 1.1, 0.05)
+        self.robot_phis = np.load(self.robot_path + '/robot_phis.npy')
+        self.robot_gamma = np.load(self.robot_path + '/robot_gammas.npy')
+        # self.robot_gamma = np.arange(start=20.0, stop=70.0 + 0.01, step=5.0)
+        # self.robot_gamma *= np.pi / 180.0
         self.num_gammas = len(self.robot_gamma)
-        # robot_phis = np.load(robot_path + '/robot_phis.npy')
-        self.robot_phis = np.linspace(-90, 90, 13)
-        self.mesh = np.load(self.robot_path + '/qs.npy')
-        self.robot_phi_gamma_velos_naive = np.load(self.robot_path + '/phi_gamma_velos_naive.npy')
-        self.robot_phi_gamma_q_idxs_naive = np.load(self.robot_path + '/phi_gamma_q_idxs_naive.npy')
-        self.zs_step = 0.05  # TODO
-        self.ae = np.load(self.robot_path + '/ae.npy')
+        # self.robot_phis = np.linspace(-90, 90, 15)
+        self.mesh = np.load(self.robot_path + '/q_idx_qs.npy')
+        self.robot_phi_gamma_velos_naive = np.load(self.robot_path + '/z_dis_phi_gamma_vel_max.npy')
+        self.robot_phi_gamma_q_idxs_naive = np.load(self.robot_path + '/z_dis_phi_gamma_vel_max_q_idxs.npy')
+        self.ae = np.load(self.robot_path + '/q_idx_ae.npy')
         """
         self.ae = np.zeros(list(self.robot_phi_gamma_q_idxs_naive.shape) + [3])
         for i in range(self.robot_phi_gamma_q_idxs_naive.shape[0]):
@@ -89,7 +91,9 @@ class ThrowFixed():
                                                           int(self.robot_phi_gamma_q_idxs_naive[i, j, k])]])
                     self.ae[i, j, k, :] = pybullet.getLinkState(self.robot, 11)[0]
         """
-        assert self.num_gammas == self.robot_phi_gamma_q_idxs_naive.shape[2]
+
+        self.zs_step = 0.05  # TODO
+        assert self.num_gammas == self.robot_phi_gamma_q_idxs_naive.shape[3]
 
         ct1 = time.time()
         print("Loading robot data cost {0:0.2f} ms".format(1000 * (ct1 - st)))
@@ -108,20 +112,6 @@ class ThrowFixed():
             num_zs = brt_zs.shape[0]
 
             # generate brt_chunk
-            from bisect import bisect_left
-            def insert_idx(a, x):
-                # return: the idx of the closest value to x
-                idx = bisect_left(a, x)
-                if idx == 0:
-                    return idx
-                elif idx == len(a):
-                    return idx - 1
-                else:
-                    if (x - a[idx - 1]) < (a[idx] - x):
-                        return idx - 1
-                    else:
-                        return idx
-
             brt_chunk = [[[] for j in range(self.num_gammas)] for i in range(num_zs)]
             states_num = 0
             pad_gamma = np.r_[-np.inf, self.robot_gamma]
@@ -177,17 +167,18 @@ class ThrowFixed():
                 l += 1
             brt_tensor = np.array(brt_tensor)
             brt_tensor = np.moveaxis(brt_tensor, 0, 2)
-            self.brt_tensor = np.expand_dims(brt_tensor, axis=1)  # insert Phi dimension
+            # [z, dis, phi, gamma, index] -> x {r, z, r_dot, z_dot, v}
+            self.brt_tensor = np.expand_dims(brt_tensor, axis=(1, 2))  # insert Phi dimension
 
             ct2 = time.time()
             print("Tensor Size: {0} with {1} states( occupation rate {2:0.1f}%)".format(
-                brt_tensor.shape, states_num, 100 * states_num * 5.0 / (np.prod(brt_tensor.shape))))
+                brt_tensor.shape, states_num, 100 * states_num / (np.prod(brt_tensor.shape[:-1]))))
             print("Generating brt tensor cost {0:0.2f} ms".format(1000 * (ct2 - ct1)))
 
         ct = time.time()
         print("Loading cost {0:0.2f} ms".format(1000 * (ct - st)))
 
-    def brt_robot_data_matching(self, box_position, thres_v=0.1, thres_dis=0.05, thres_phi=0.1):
+    def brt_robot_data_matching(self, box_position, thres_v=0.1, thres_dis=0.02, thres_phi=0.04):
         """
         Given target position, find out initial guesses of (q, phi, x), that is to be feed to Ruckig
         :param box_position:
@@ -221,39 +212,51 @@ class ThrowFixed():
         if z_num == 0 or rzs_idx_end <= 0:
             return [], [], []
 
-        # BRT-Tensor = {z, phi(length=1), gamma, brt states array, x(length=5))}
+        # BRT-Tensor = {z, dis(length=1), phi(length=1), gamma, idx} -> brt state,
+        # x = {r, z, r_dot, z_dot, speed}(length=5)
         brt_tensor = self.brt_tensor[bzs_idx_start:bzs_idx_end + 1, ...]
 
         # Fixed-base limitation
-        robot_tensor_v = np.expand_dims(self.robot_phi_gamma_velos_naive[rzs_idx_start: rzs_idx_end + 1, ...], axis=3)
-        AE = self.ae[..., :-1]
-        EB = AB - AE
-        phis = np.arctan2(AE[..., 0] * EB[..., 1] - AE[..., 1] * EB[..., 0],
-                          AE[..., 0] * EB[..., 0] + AE[..., 1] * EB[..., 1])
-        # filter out wrong directions
-        robot_phis = self.robot_phis / 180.0 * np.pi
-        robot_phis = np.expand_dims(robot_phis, axis=1)
-        mask_phi = np.abs(phis[rzs_idx_start: rzs_idx_end + 1, ...] - robot_phis) < thres_phi
-        mask_phi_tensor = np.expand_dims(mask_phi, axis=3)
+        # Robot-Tensor = {z, dis, phi, gamma} -> max_v
+        robot_tensor_v = np.expand_dims(self.robot_phi_gamma_velos_naive[rzs_idx_start: rzs_idx_end + 1, ...], axis=4)
+        # 1. filter on dis:
+        # we can only throw 'out'
+        b = np.linalg.norm(AB)
+        robot_tensor_v = robot_tensor_v[:, np.where(self.robot_dis < b)[0], ...]
 
-        dis = np.linalg.norm(EB, axis=-1)
-        robot_tensor_r = np.expand_dims(dis[rzs_idx_start: rzs_idx_end + 1, ...], axis=3)
+        # 2. calculate desired r
+        cos_phi = np.cos(self.robot_phis)
+        # [dis, phi] -> r
+        dcosphi = self.robot_dis[:, np.newaxis] @ cos_phi[np.newaxis, :]  # TODO: this can be stored
+        r = np.sqrt(b**2 - self.robot_dis[:, None]**2 + dcosphi**2) - dcosphi
+        r_tensor = r[None, :, :, None, None]
+        mask_r = abs(-brt_tensor[:, :, :, :, :, 0] - r_tensor) < thres_dis
+        # TODO: re-compute BRT states that
+        # brt_tensor[:, :, :, :, :, 0] - r > 0
+
         st1 = time.time()
 
-        validate = np.argwhere((robot_tensor_v - thres_v - brt_tensor[:, :, :, :, 4] > 0)  # velocity satisfy
-                               * (robot_tensor_r < -brt_tensor[:, :, :, :, 0] + thres_dis)  # distance
-                               * (robot_tensor_r > -brt_tensor[:, :, :, :, 0] - thres_dis)
-                               * mask_phi_tensor
+        validate = np.argwhere((robot_tensor_v - thres_v - brt_tensor[:, :, :, :, :, 4] > 0)  # velocity satisfy
+                               * mask_r
                                )
                             # TODO: re-compute BRT states that
                             # robot_tensor_r < -brt_tensor[:, :, :, :, 0]
-        # validate: z, phi, gamma, idx_of_brt
+        # validate: z, dis, phi, gamma, idx_of_brt
 
-        q_indices = validate[:, :3]
+
+        q_indices = validate[:, :4]
         q_indices[:, 0] += rzs_idx_start
-        q_candidates = self.mesh[self.robot_phi_gamma_q_idxs_naive[tuple(q_indices.T)].astype(int), :]
-        phi_candidates = self.robot_phis[validate[:, 1]]
-        x_candidates = brt_tensor[:, 0, :, :, :][tuple(np.r_['-1', validate[:, :1], validate[:, 2:4]].T)][:, :4]
+        qids = self.robot_phi_gamma_q_idxs_naive[tuple(q_indices.T)].astype(int)
+        q_candidates = self.mesh[qids, :]
+        q_ae = self.ae[qids]
+        phi_candidates = self.robot_phis[validate[:, 2]]
+        x_candidates = brt_tensor[:, 0, 0, :, :, :][tuple(np.r_['-1', validate[:, :1], validate[:, 3:5]].T)][:, :4]
+        # compensate alpha
+        beta = np.arctan2(AB[1], AB[0])
+        dis = np.linalg.norm(q_ae[:, :2], axis=1)
+        alpha = -np.arccos(np.clip((dis-x_candidates[:, 0]*np.cos(phi_candidates))/b, -1, 1))*np.sign(dis) + beta
+        AE_alpha = np.arctan2(q_ae[:, 1], q_ae[:, 0])
+        q_candidates[:, 0] += alpha - AE_alpha
 
         ct = time.time()
         print("Given query z= {0:0.2f}, found {1} initial guesses in {2:0.2f} ms".format(
@@ -315,7 +318,7 @@ class ThrowFixed():
         J = np.array(J)
         J = J[:, :7]
 
-        throwing_angle = np.arctan2(AE[1], AE[0]) + math.pi * phi / 180
+        throwing_angle = np.arctan2(AE[1], AE[0]) + phi
         EB_dir = np.array([np.cos(throwing_angle), np.sin(throwing_angle)])
 
         J_xyz = J[:3, :]
@@ -468,7 +471,7 @@ class ThrowFixed():
 if __name__ == "__main__":
     manipulator = ThrowFixed(np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]),
                              np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]),
-                             "robot_data/panda_5_joint_dense_1_dataset_15",
+                             "robot_data/panda_5_joint_fix_0.4",
                              "object_data/brt_gravity_only")
     manipulator.load_data()
     manipulator.solve(np.array([1.2, 0.5, -0.5]), animate=True)

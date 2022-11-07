@@ -244,8 +244,8 @@ if __name__ == "__main__":
     np.save(prefix+'robot_phis.npy', Phi)
     np.save(prefix+'robot_gammas.npy', Gamma)
     # delta_q = 0.2  # 4601952
-    # delta_q = 0.3  # 686400 -> 281116
-    delta_q = 0.4  # 162000 -> 10490
+    delta_q = 0.3  # 686400 -> 44527
+    # delta_q = 0.4  # 162000 -> 10490
     # delta_q = 0.5  # 64512
     vel_max, argmax_q, q_ae = main(robot=pandas, delta_q=delta_q, Z=Z, Dis=Dis, Phi=Phi, Gamma=Gamma)
     np.save(prefix+"z_dis_phi_gamma_vel_max", vel_max)
@@ -280,7 +280,7 @@ if __name__ == "__main__":
                         qs.append(q)
                         aes.append(ae)
                     q_idxs[i, j, k, l] = qid
-    np.save(prefix+'z_dis_phi_gamma_vel_max_q_idxs', np.array(qs))
-    np.save(prefix+'q_idx_qs', q_idxs)
+    np.save(prefix+'z_dis_phi_gamma_vel_max_q_idxs', q_idxs)
+    np.save(prefix+'q_idx_qs', np.array(qs))
     np.save(prefix+'q_idx_ae', np.array(aes))
     print("Done.")

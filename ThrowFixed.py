@@ -178,7 +178,7 @@ class ThrowFixed():
         ct = time.time()
         print("Loading cost {0:0.2f} ms".format(1000 * (ct - st)))
 
-    def brt_robot_data_matching(self, box_position, thres_v=0.1, thres_dis=0.02, thres_phi=0.04):
+    def brt_robot_data_matching(self, box_position, thres_v=0.1, thres_dis=0.01, thres_phi=0.04):
         """
         Given target position, find out initial guesses of (q, phi, x), that is to be feed to Ruckig
         :param box_position:
@@ -227,8 +227,9 @@ class ThrowFixed():
         # 2. calculate desired r
         cos_phi = np.cos(self.robot_phis)
         # [dis, phi] -> r
-        dcosphi = self.robot_dis[:, np.newaxis] @ cos_phi[np.newaxis, :]  # TODO: this can be stored
-        r = np.sqrt(b**2 - self.robot_dis[:, None]**2 + dcosphi**2) - dcosphi
+        dcosphi = self.robot_dis[self.robot_dis < b, np.newaxis] @ cos_phi[np.newaxis, :]  # TODO: this can be stored
+        # TODO: It's better to use real r to control the error
+        r = np.sqrt(b**2 - self.robot_dis[self.robot_dis < b, None]**2 + dcosphi**2) - dcosphi
         r_tensor = r[None, :, :, None, None]
         mask_r = abs(-brt_tensor[:, :, :, :, :, 0] - r_tensor) < thres_dis
         # TODO: re-compute BRT states that
@@ -254,9 +255,11 @@ class ThrowFixed():
         # compensate alpha
         beta = np.arctan2(AB[1], AB[0])
         dis = np.linalg.norm(q_ae[:, :2], axis=1)
-        alpha = -np.arccos(np.clip((dis-x_candidates[:, 0]*np.cos(phi_candidates))/b, -1, 1))*np.sign(dis) + beta
+        alpha = -np.arccos(np.clip((dis-x_candidates[:, 0]*np.cos(phi_candidates))/b, -1, 1))*np.sign(phi_candidates) + beta
         AE_alpha = np.arctan2(q_ae[:, 1], q_ae[:, 0])
         q_candidates[:, 0] += alpha - AE_alpha
+        q_candidates[q_candidates[:, 0] > np.pi, 0] -= 2*np.pi
+        q_candidates[q_candidates[:, 0] < -np.pi, 0] += 2*np.pi
 
         ct = time.time()
         print("Given query z= {0:0.2f}, found {1} initial guesses in {2:0.2f} ms".format(
@@ -273,25 +276,44 @@ class ThrowFixed():
         trajs = []
         throw_configs = []
         st = time.time()
+        num_outlimit = 0
+        num_hit = 0
+        num_ruckigerr = 0
+        num_small_deviation = 0
         for i in range(n_candidates):
             candidate_idx = i
+            # q limit -- just check joint 0
+            q0 = q_candidates[candidate_idx][0]
+            if q0 > self.ul[0] or q0 < self.ll[0]:
+                num_outlimit += 1
+                continue
+
             throw_config_full = self.get_full_throwing_config(self.robot, q_candidates[candidate_idx],
                                                               phi_candidates[candidate_idx],
                                                               x_candidates[candidate_idx])
             # filter out throwing configuration that will hit gripper palm
             if throw_config_full[4][2] < -0.02:
+                num_hit += 1
                 continue
             # calculate throwing trajectory
             traj_throw = self.get_traj_from_ruckig(q0=self.q0, q0_dot=self.q0_dot,
                                                    qd=throw_config_full[0], qd_dot=throw_config_full[3],
                                                    base0=base0, based=-throw_config_full[-1][:-1])
             if traj_throw.duration < 1e-10:  # unknown error
+                num_ruckigerr += 1
                 continue
+            deviation = throw_config_full[-1][:2] + base0
+            if np.linalg.norm(deviation) < 0.01:
+                num_small_deviation += 1
+            #     continue
             traj_durations.append(traj_throw.duration)
             trajs.append(traj_throw)
             throw_configs.append(throw_config_full)
 
-        print("Found {0} good throws in {0:0.2f} ms".format(len(throw_configs), 1000 * (time.time() - st)))
+        print("Found {} good throws in {:0.2f} ms".format(len(throw_configs), 1000 * (time.time() - st)))
+        print("\t\t out of joint limit: {}, hit the palm: {}, ruckig error: {}".format(
+            num_outlimit, num_hit, num_ruckigerr))
+        print("\t\t No. solution with small deviation", num_small_deviation)
         return trajs, throw_configs
 
     @staticmethod
@@ -471,21 +493,21 @@ class ThrowFixed():
 if __name__ == "__main__":
     manipulator = ThrowFixed(np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]),
                              np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]),
-                             "robot_data/panda_5_joint_fix_0.4",
+                             "robot_data/panda_5_joint_fix_0.3",
                              "object_data/brt_gravity_only")
     manipulator.load_data()
-    manipulator.solve(np.array([1.2, 0.5, -0.5]), animate=True)
+    manipulator.solve(np.array([-0.5, 0.5, 0.5]), animate=False)
 
     """
     while True:
         # input box position
         print("Input query box position\n")
-        x = input("x(default=-3):")
+        x = input("x(default=-1):")
         if x == "":
             x = -3.0
         else:
             x = float(x)
-        y = input("y(default=3):")
+        y = input("y(default=1):")
         if y == "":
             y = 3.0
         else:

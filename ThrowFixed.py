@@ -244,14 +244,22 @@ class ThrowFixed():
                             # robot_tensor_r < -brt_tensor[:, :, :, :, 0]
         # validate: z, dis, phi, gamma, idx_of_brt
 
-
-        q_indices = validate[:, :4]
+        q_indices = np.copy(validate[:, :4])
         q_indices[:, 0] += rzs_idx_start
         qids = self.robot_phi_gamma_q_idxs_naive[tuple(q_indices.T)].astype(int)
         q_candidates = self.mesh[qids, :]
         q_ae = self.ae[qids]
         phi_candidates = self.robot_phis[validate[:, 2]]
         x_candidates = brt_tensor[:, 0, 0, :, :, :][tuple(np.r_['-1', validate[:, :1], validate[:, 3:5]].T)][:, :4]
+        # TODO: unknown error
+        error_index = np.nonzero(np.sum(np.isnan(x_candidates), axis=1))
+        if error_index[0].shape[0] > 0:
+            print("--error!!!")
+            a = input("input to continue")
+            q_candidates = np.delete(q_candidates, error_index, axis=0)
+            q_ae = np.delete(q_ae, error_index, axis=0)
+            phi_candidates = np.delete(phi_candidates, error_index, axis=0)
+            x_candidates = np.delete(x_candidates, error_index, axis=0)
         # compensate alpha
         beta = np.arctan2(AB[1], AB[0])
         dis = np.linalg.norm(q_ae[:, :2], axis=1)
@@ -262,8 +270,8 @@ class ThrowFixed():
         q_candidates[q_candidates[:, 0] < -np.pi, 0] += 2*np.pi
 
         ct = time.time()
-        print("Given query z= {0:0.2f}, found {1} initial guesses in {2:0.2f} ms".format(
-            z_target_to_base, len(q_candidates), 1000 * (ct - st)),
+        print("Given query box_position= {0}, \n\tfound {1} initial guesses in {2:0.2f} ms".format(
+            box_position, len(q_candidates), 1000 * (ct - st)),
             "\n\tcore operation takes {0:0.2f} ms".format(1000 * (ct - st1)))
 
         return q_candidates, phi_candidates, x_candidates
@@ -276,10 +284,7 @@ class ThrowFixed():
         trajs = []
         throw_configs = []
         st = time.time()
-        num_outlimit = 0
-        num_hit = 0
-        num_ruckigerr = 0
-        num_small_deviation = 0
+        num_outlimit, num_hit, num_ruckigerr, num_small_deviation = 0, 0, 0, 0
         for i in range(n_candidates):
             candidate_idx = i
             # q limit -- just check joint 0
@@ -488,7 +493,63 @@ class ThrowFixed():
             pybullet.stopStateLogging(logId)
         pybullet.disconnect()
 
+    def boundary(self, npoints: int, scale=np.array([2, 2, 2]), scale_low=None):
+        """
+        Find the boundary of the position where there exist a solution
+        :param npoints: number of points
+        :param scale: start with the position limit
+        :param scale_low: lower bound
+        :return:
+        """
+        if scale_low is None:
+            scale_low = -scale
+        pts = np.random.uniform(scale_low, scale, [npoints, 3])
+        n = np.array([self.solve(pt) for pt in pts])
 
+        import matplotlib.pyplot as plt
+        fig = plt.figure()
+        ax = fig.add_subplot(projection='3d')
+        success = np.where(n > 0)[0]
+        failed = np.setdiff1d(np.arange(npoints), success)
+        scatter_plot = ax.scatter3D(pts[success, 0], pts[success, 1], pts[success, 2], c=n[success], alpha=0.6, cmap=plt.get_cmap('summer'))
+        plt.colorbar(scatter_plot)
+        ax.scatter3D(pts[failed, 0], pts[failed, 1], pts[failed, 2], c='red', alpha=0.2)
+        ax.set_xlabel('x')
+        ax.set_ylabel('y')
+        ax.set_zlabel('z')
+
+        success_pts = pts[success]
+        # most far away one
+        id_far = np.argmax(np.linalg.norm(success_pts[:, :2]))
+        print("The most far away one: ", success_pts[id_far])
+        # highest
+        print("The highest one: ", success_pts[np.argmax(success_pts[:, 2])])
+
+        plt.show()
+
+def plot_solution_num_distribution(manipulator, nx, ny, nz):
+    x, y, z = np.linspace(-2.0, 2.0+1e-10, nx), np.linspace(-2.0, 2.0+1e-10, ny), np.linspace(-2.0, 1.0+1e-10, nz)
+    xx, yy, zz = np.meshgrid(x, y, z)
+    n = np.array([[[manipulator.solve(np.array([xx[i, j, k], yy[i, j, k], zz[i, j, k]])) \
+                    for k in range(nz)] for j in range(ny)] for i in range(nx)])
+    np.save('num_solution', n)
+    import matplotlib.pyplot as plt
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+
+    levels = np.linspace(n.min(), n.max(), 100)
+    for i in range(nz):
+        scatter_plot = ax.contourf(x, y, n[:, :, i], alpha=0.4, levels=levels, zdir='z', offset=z[i], cmap=plt.get_cmap('rainbow'))
+
+    #scatter_plot = ax.scatter3D(xx[idx], yy[idx], zz[idx], c=n[idx], alpha=0.6)
+    # , cmap=plt.get_cmap('spring'))
+    plt.colorbar(scatter_plot)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    ax.set_zlabel('z')
+    ax.set_zlim3d(z.min(), z.max())
+    plt.title("Number of solutions")
+    plt.show()
 
 if __name__ == "__main__":
     manipulator = ThrowFixed(np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]),
@@ -496,7 +557,13 @@ if __name__ == "__main__":
                              "robot_data/panda_5_joint_fix_0.3",
                              "object_data/brt_gravity_only")
     manipulator.load_data()
-    manipulator.solve(np.array([-0.5, 0.5, 0.5]), animate=False)
+
+    plot_solution_num_distribution(manipulator, 21, 21, 11)
+
+    # manipulator.solve(np.array([-1.2, -0.4,  0.7]), animate=True)#, video_path="./fixed-sample.mp4")
+
+    """
+    """
 
     """
     while True:

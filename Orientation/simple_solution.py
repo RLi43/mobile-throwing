@@ -12,14 +12,14 @@ q_dot_ul = np.array([2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100])
 PANDA_BASE_HEIGHT = 0.5076438625
 bottle_height = 0.18
 
-box_position = np.array([0.8, 0.0, 0.5])
+box_position = np.array([1.5, 0.0, 0.5])
 desired_theta = -np.pi / 2
 desired_vy_end_max = 1.5
 desired_vx_end_max = 0.1
 
 # Select a Q
 # keep joint 1, 3, 5, 7 = 0
-q0 = np.array([0.0, 0.5, 0.0, -0.5, 0.0, 2.0, -135 / 180.0 * np.pi])
+q0 = np.array([0.0, 0.7, 0.0, -0.5, 0.0, 2.0, -135 / 180.0 * np.pi])
 
 
 def forward(q):
@@ -73,13 +73,19 @@ def qdot4vel(vx, vy):
 def qdotnorm(x):
     q_dot = qdot4vel(x[0], x[1])
     return np.linalg.norm(q_dot)
-
+def qdotmax(x):
+    q_dot = qdot4vel(x[0], x[1])
+    return np.max(np.abs(q_dot))
+def deviation_onx(x):
+    return abs(dr - x[0] * flying_time(x[1]))
 
 from scipy.optimize import minimize
 
 # vx >= 0, vy >= 0
 x_init = np.array([0, 0])
-res = minimize(lambda x: abs(dr - x[0] * flying_time(x[1])), x_init, constraints=(
+# obj = deviation_onx
+obj = qdotmax
+res = minimize(obj, x_init, constraints=(
     {'type': 'ineq', 'fun': lambda x: x[0]},
     {'type': 'ineq', 'fun': lambda x: x[1]},
     {'type': 'ineq', 'fun': lambda x: q_dot_ul * 0.9 - qdot4vel(x[0], x[1])[:, 0]},

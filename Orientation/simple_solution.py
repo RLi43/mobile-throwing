@@ -1,7 +1,8 @@
 import time
 
-import pybullet, pybullet_data
 import numpy as np
+import pybullet
+import pybullet_data
 
 gravity = -9.81
 urdf_path = "franka_panda/panda.urdf"
@@ -9,8 +10,16 @@ q_ul = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
 q_ll = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
 q_dot_ul = np.array([2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100])
 PANDA_BASE_HEIGHT = 0.5076438625
-box_position = np.array([1.0, 0.0, -0.5])
+bottle_height = 0.18
+
+box_position = np.array([0.8, 0.0, 0.5])
 desired_theta = -np.pi / 2
+desired_vy_end_max = 1.5
+desired_vx_end_max = 0.1
+
+# Select a Q
+# keep joint 1, 3, 5, 7 = 0
+q0 = np.array([0.0, 0.5, 0.0, -0.5, 0.0, 2.0, -135 / 180.0 * np.pi])
 
 
 def forward(q):
@@ -30,36 +39,64 @@ clid = pybullet.connect(pybullet.DIRECT)
 pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())  # optionally
 robot = pybullet.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True, flags=pybullet.URDF_USE_INERTIA_FROM_FILE)
 
-# Select a Q
-# keep joint 1, 3, 5, 7 = 0
-q0 = np.array([0.0, 0.5, 0.0, -0.5, 0.0, 2.0, 45 / 180.0 * np.pi])
 AE, ori_q, J = forward(q0)
-theta_E = np.arccos(ori_q[0])*2
-print(AE, ori_q, theta_E)
+theta_E = np.arccos(ori_q[3]) * 2 * np.sign(ori_q[1])
+# print(AE, ori_q, theta_E)
 print("r_E:{:.3f}, z_E:{:.3f}, theta_E:{:.3f}".format(AE[0], AE[2], theta_E))
 
-# v0 = sqrt(x^2*g/ (x*sin(2theta) -2y cos^2(theta))
+dz = box_position[2] - AE[2] + bottle_height / 2
 dr = box_position[0] - AE[0]
-dz = box_position[2] - AE[2]
 dtheta = desired_theta - theta_E
-v0 = np.sqrt((dr ** 2 * np.abs(gravity)) / (dr * np.sin(2 * theta_E) - 2 * dz * (np.cos(theta_E) ** 2)))
-vx = v0 * np.cos(theta_E)
-vy = v0 * np.sin(theta_E)
-flying_time = dr/vx
 dtheta = dtheta % np.pi
-if dtheta > np.pi/2:
+if dtheta > np.pi / 2:
     dtheta -= np.pi
-omega = dtheta / flying_time  # dtheta + n*pi
-print("dr:{:.3f}, dz:{:.3f}, dtheta:{:.3f} ".format(dr, dz, dtheta))
-print("vx:{:.3f}, vy:{:.3f}, omega:{:.3f}, flying time::{:.3f}".format(vx, vy, omega, flying_time))
-# solve q_dot
-b = np.array([vx, 0, vy, 0, omega, 0]).transpose()
-q_dot = np.linalg.pinv(J) @ b
-print(q_dot)
-if(np.any(np.abs(q_dot) > q_dot_ul)):
-    print('the solution is out of the speed limit')
+print("dr:{:.3f}, dz:{:.3f}, dtheta:{:.3f}".format(dr, dz, dtheta))
 
-ANIMATE = False
+# find avaliable vx, vy
+def flying_time(vy):
+    return -vy / gravity + np.sqrt((vy / gravity) ** 2 + 2 * dz / gravity)
+
+
+def qdot4vel(vx, vy):
+    ft = flying_time(vy)
+    vy_end = vy + gravity * ft
+    omega = dtheta / ft
+
+    vels = np.array([[vx, 0, vy, 0, omega, 0]]).transpose()
+    q_dot = np.linalg.pinv(J) @ vels
+    return q_dot
+
+    # print("vx:{:.3f}, vy:{:.3f}, omega:{:.3f}, flying time::{:.3f}".format(vx, vy, omega, ft))
+    # print(q_dot)
+
+
+def qdotnorm(x):
+    q_dot = qdot4vel(x[0], x[1])
+    return np.linalg.norm(q_dot)
+
+
+from scipy.optimize import minimize
+
+# vx >= 0, vy >= 0
+x_init = np.array([0, 0])
+res = minimize(lambda x: abs(dr - x[0] * flying_time(x[1])), x_init, constraints=(
+    {'type': 'ineq', 'fun': lambda x: x[0]},
+    {'type': 'ineq', 'fun': lambda x: x[1]},
+    {'type': 'ineq', 'fun': lambda x: q_dot_ul * 0.9 - qdot4vel(x[0], x[1])[:, 0]},
+    {'type': 'ineq', 'fun': lambda x: q_dot_ul * 0.9 + qdot4vel(x[0], x[1])[:, 0]},
+))
+vx, vy = res.x
+q_dot = qdot4vel(vx, vy)
+ft = flying_time(vy)
+omega = dtheta / ft
+print('vx:{:.3f}, vy:{:.3f}, omega:{:.3f}, flying time:{:.3f}'.format(vx, vy, omega, ft))
+deviation = dr - vx * ft
+print('translation on x:{:.3f}, deviation:{:.3f}'.format(vx * ft, deviation))
+print(q_dot[:, 0])
+# if (np.any(np.abs(q_dot) > q_dot_ul)):
+#     print('the solution is out of the speed limit')
+
+ANIMATE = True
 if ANIMATE:
     # Simulation
     pybullet.disconnect()
@@ -83,6 +120,7 @@ if ANIMATE:
     planeId = pybullet.loadURDF("plane.urdf", [0, 0, 0.0])
     # Create Cylinder
     # bottleId = pybullet.createVisualShape(shapeType=pybullet.GEOM_CYLINDER, radius=0.03, length=0.1)
+    # currently the collision size is reduced to avoid collision with the gripper
     bottleId = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/bottle.urdf",
                                  [-3.0, 0, 3], globalScaling=0.01)
     # soccerballId = pybullet.loadURDF("soccerball.urdf", [-3.0, 0, 3], globalScaling=0.05)
@@ -99,11 +137,15 @@ if ANIMATE:
     pybullet.resetBasePositionAndOrientation(robotId, [-box_position[0], -box_position[1], 0], [0, 0, 0, 1])
     pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in q0])
     eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
-    pybullet.resetBasePositionAndOrientation(bottleId, eef_state[0], pybullet.getQuaternionFromEuler([0, np.pi / 2, 0]))
+    pybullet.resetBasePositionAndOrientation(bottleId, eef_state[0], eef_state[1])
+    pybullet.resetBaseVelocity(bottleId, linearVelocity=[vx, 0, vy], angularVelocity=[0, omega, 0])
     # eef_state[1])
     pybullet.resetJointState(robotId, gripper_joints[0], 0.03)
     pybullet.resetJointState(robotId, gripper_joints[1], 0.03)
-    pybullet.stepSimulation()
-    time.sleep(0.001)
-
-    input("Enter to quit")
+    # pybullet.stepSimulation()
+    try:
+        while True:
+            pybullet.stepSimulation()
+            time.sleep(0.001)
+    except KeyboardInterrupt:
+        pass

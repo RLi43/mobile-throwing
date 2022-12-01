@@ -44,7 +44,7 @@ theta_E = np.arccos(ori_q[3]) * 2 * np.sign(ori_q[1])
 # print(AE, ori_q, theta_E)
 print("r_E:{:.3f}, z_E:{:.3f}, theta_E:{:.3f}".format(AE[0], AE[2], theta_E))
 
-dz = box_position[2] - AE[2] + bottle_height / 2
+dz = box_position[2] - AE[2]  # - bottle_height / 2 * abs(np.cos(desired_theta))
 dr = box_position[0] - AE[0]
 dtheta = desired_theta - theta_E
 dtheta = dtheta % np.pi
@@ -52,8 +52,10 @@ if dtheta > np.pi / 2:
     dtheta -= np.pi
 print("dr:{:.3f}, dz:{:.3f}, dtheta:{:.3f}".format(dr, dz, dtheta))
 
+
 # find avaliable vx, vy
 def flying_time(vy):
+    # assume a static dz(the land pose will be exactly what we expect)
     return -vy / gravity + np.sqrt((vy / gravity) ** 2 + 2 * dz / gravity)
 
 
@@ -73,11 +75,16 @@ def qdot4vel(vx, vy):
 def qdotnorm(x):
     q_dot = qdot4vel(x[0], x[1])
     return np.linalg.norm(q_dot)
+
+
 def qdotmax(x):
     q_dot = qdot4vel(x[0], x[1])
     return np.max(np.abs(q_dot))
+
+
 def deviation_onx(x):
     return abs(dr - x[0] * flying_time(x[1]))
+
 
 from scipy.optimize import minimize
 
@@ -103,7 +110,9 @@ print(q_dot[:, 0])
 #     print('the solution is out of the speed limit')
 
 ANIMATE = True
-if ANIMATE:
+
+
+def simulate():
     # Simulation
     pybullet.disconnect()
     clid = pybullet.connect(pybullet.GUI)
@@ -121,7 +130,7 @@ if ANIMATE:
     pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())
     robotEndEffectorIndex = 14
     robotId = pybullet.loadURDF("../descriptions/rbkairos_description/robots/rbkairos_panda_hand.urdf",
-                                [-box_position[0], -box_position[1], 0], useFixedBase=True)
+                                [0, 0, 0], useFixedBase=True)
 
     planeId = pybullet.loadURDF("plane.urdf", [0, 0, 0.0])
     # Create Cylinder
@@ -131,7 +140,7 @@ if ANIMATE:
                                  [-3.0, 0, 3], globalScaling=0.01)
     # soccerballId = pybullet.loadURDF("soccerball.urdf", [-3.0, 0, 3], globalScaling=0.05)
     boxId = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/box.urdf",
-                              [0, 0, PANDA_BASE_HEIGHT + box_position[2]],
+                              [box_position[0], box_position[1], PANDA_BASE_HEIGHT + box_position[2]],
                               globalScaling=0.5)
     pybullet.changeDynamics(bottleId, -1, mass=1.0, linearDamping=0.00, angularDamping=0.00,
                             rollingFriction=0.03,
@@ -139,8 +148,10 @@ if ANIMATE:
     pybullet.changeDynamics(planeId, -1, restitution=0.9)
     pybullet.changeDynamics(robotId, gripper_joints[0], jointUpperLimit=100)
     pybullet.changeDynamics(robotId, gripper_joints[1], jointUpperLimit=100)
+    # disable collision
+    # pybullet.setCollisionFilterGroupMask(bottleId, 0, 0, 0)
 
-    pybullet.resetBasePositionAndOrientation(robotId, [-box_position[0], -box_position[1], 0], [0, 0, 0, 1])
+    pybullet.resetBasePositionAndOrientation(robotId, [0, 0, 0], [0, 0, 0, 1])
     pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in q0])
     eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
     pybullet.resetBasePositionAndOrientation(bottleId, eef_state[0], eef_state[1])
@@ -152,6 +163,73 @@ if ANIMATE:
     try:
         while True:
             pybullet.stepSimulation()
-            time.sleep(0.001)
+            time.sleep(delta_t)
     except KeyboardInterrupt:
         pass
+
+
+def landing_pose(q_dot):
+    # using simulator
+    vels = J @ q_dot
+
+    controlled_joints = [3, 4, 5, 6, 7, 8, 9]
+    gripper_joints = [12, 13]
+    robotEndEffectorIndex = 14
+    robotId = pybullet.loadURDF("../descriptions/rbkairos_description/robots/rbkairos_panda_hand.urdf",
+                                [0, 0, 0], useFixedBase=True)
+    pybullet.resetBasePositionAndOrientation(robotId, [0, 0, 0], [0, 0, 0, 1])
+    pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in q0])
+    eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
+    pybullet.resetSimulation()
+
+    # pybullet.disconnect()
+    # clid = pybullet.connect(pybullet.GUI)
+    # pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI, 0)
+    # pybullet.resetDebugVisualizerCamera(cameraDistance=2.0, cameraYaw=10, cameraPitch=-40,
+    #                                     cameraTargetPosition=[0.75, 0.5, 0.2])
+    hz = 1000
+    delta_t = 1.0 / hz
+    pybullet.setGravity(0, 0, gravity)
+    pybullet.setTimeStep(delta_t)
+    pybullet.setRealTimeSimulation(0)
+
+    pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())
+
+    planeId = pybullet.loadURDF("plane.urdf", [0, 0, 0.0])
+    bottleId = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/bottle.urdf",
+                                 [-3.0, 0, 3], globalScaling=0.01)
+    pybullet.changeDynamics(bottleId, -1, mass=1.0, linearDamping=0.00, angularDamping=0.00,
+                            rollingFriction=0.03,
+                            spinningFriction=0.03, restitution=0.2, lateralFriction=0.03)
+    pybullet.changeDynamics(planeId, -1, restitution=0.9)
+
+    pybullet.resetBasePositionAndOrientation(bottleId, eef_state[0], eef_state[1])
+    pybullet.resetBaseVelocity(bottleId, linearVelocity=vels[0:3], angularVelocity=vels[3:])
+    while True:
+        pybullet.stepSimulation()
+        # time.sleep(delta_t)
+        bottle_state = pybullet.getBasePositionAndOrientation(bottleId)
+        if bottle_state[0][2] < PANDA_BASE_HEIGHT + box_position[2]:
+            return bottle_state
+
+
+pos, q_land = landing_pose(q_dot)
+print("Expected Landing state", pos, pybullet.getEulerFromQuaternion(q_land))
+
+
+# sensitivity analyze
+def sensitivity(q_dot, sample_n=10, noise=np.ones((7, 1)) * 0.1):
+    qds = q_dot + np.random.random((7, sample_n)) * noise
+    eulers = []
+    for i in range(sample_n):
+        pos, q_land = landing_pose(qds[:, i])
+        eulers.append(pybullet.getEulerFromQuaternion(q_land))
+    eulers = np.array(eulers)
+    deulers = eulers - np.array([0, desired_theta, 0])
+    deulers[deulers > np.pi / 2] -= np.pi
+    print("Average deviation on orientation", np.average(np.abs(deulers), axis=0))
+
+
+sensitivity(q_dot)
+# if ANIMATE:
+#     simulate()

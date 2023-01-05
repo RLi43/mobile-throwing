@@ -31,26 +31,24 @@ pybullet.disconnect(clid)
 # initial state
 q0 = np.array([0.0, 0.2, 0.0, -0.5, 0.0, 1.00, 0.0 + 45/180*np.pi])
 q0_dot = np.array([0.0] * 7)
-base_position0 = [0.0, 0.0]
-base_positiond = base_position0
 
 # find trajectory
-inp = InputParameter(9)
+inp = InputParameter(7)
 zeros2 = np.zeros(2)
-inp.current_position = np.concatenate((q0, base_position0))
-inp.current_velocity = np.concatenate((q0_dot, zeros2))
-inp.current_acceleration = np.zeros(9)
+inp.current_position = q0
+inp.current_velocity = q0_dot
+inp.current_acceleration = np.zeros(7)
 
-inp.target_position = np.concatenate((qd, base_positiond))
-inp.target_velocity = np.concatenate((qd_dot, zeros2))
-inp.target_acceleration = np.zeros(9)
+inp.target_position = qd
+inp.target_velocity = qd_dot
+inp.target_acceleration = np.zeros(7)
 
-inp.max_velocity = np.array([2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100, 2.0, 2.0])
-inp.max_acceleration = np.array([15, 7.5, 10, 12.5, 15, 20, 20, 5.0, 5.0]) -1.0
-inp.max_jerk = np.array([7500, 3750, 5000, 6250, 7500, 10000, 10000, 1000, 1000]) - 100
+inp.max_velocity = np.array([2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100])
+inp.max_acceleration = np.array([15, 7.5, 10, 12.5, 15, 20, 20]) - 1.0
+inp.max_jerk = np.array([7500, 3750, 5000, 6250, 7500, 10000, 10000]) - 100
 
-otg = Ruckig(9)
-trajectory = Trajectory(9)
+otg = Ruckig(7)
+trajectory = Trajectory(7)
 _ = otg.calculate(inp, trajectory)
 
 # simulate
@@ -72,12 +70,14 @@ pybullet.setRealTimeSimulation(0)
 #AE = throw_config_full[-2]
 #EB = box_position - AE
 
-controlled_joints = [3, 4, 5, 6, 7, 8, 9]
-gripper_joints = [12, 13]
+controlled_joints = [0, 1, 2, 3, 4, 5, 6] #[3, 4, 5, 6, 7, 8, 9]
+gripper_joints = [9, 10]
 numJoints = len(controlled_joints)
 pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())
-robotEndEffectorIndex = 14
-robotId = pybullet.loadURDF("../descriptions/rbkairos_description/robots/rbkairos_panda_hand.urdf",
+robotEndEffectorIndex = 11 #14
+# robotId = pybullet.loadURDF("../descriptions/rbkairos_description/robots/rbkairos_panda_hand.urdf",
+#                      [0, 0, PANDA_BASE_HEIGHT], useFixedBase=True)
+robotId = pybullet.loadURDF("../descriptions/franka_panda_bullet_new/panda.urdf",
                      [0, 0, PANDA_BASE_HEIGHT], useFixedBase=True)
 
 planeId = pybullet.loadURDF("plane.urdf", [0, 0, 0.0])
@@ -107,22 +107,22 @@ pybullet.changeDynamics(robotId, gripper_joints[0], jointUpperLimit=100)
 pybullet.changeDynamics(robotId, gripper_joints[1], jointUpperLimit=100)
 objectId = water_bottle_id
 
+# for i in range(pybullet.getNumJoints(robotId)):
+#     index, jName, _, _, _, _, _, _, _, _, _, _, lName, _, _, _, pIndex = pybullet.getJointInfo(robotId, i)
+#     print(index, 'joint name', jName, 'link name', lName, 'parent index', pIndex)
 t0, tf = 0, trajectory.duration
 plan_time = tf - t0
 sample_t = np.arange(0, tf, delta_t)
 n_steps = sample_t.shape[0]
 traj_data = np.zeros([3, n_steps, 7])
-base_traj_data = np.zeros([3, n_steps, 2])
 for i in range(n_steps):
     for j in range(3):
         tmp = trajectory.at_time(sample_t[i])[j]
         traj_data[j, i] = tmp[:7]
-        base_traj_data[j, i] = tmp[-2:]
 
 # reset the joint
 # see https://github.com/bulletphysics/bullet3/issues/2803#issuecomment-770206176
 q0 = traj_data[0, 0]
-pybullet.resetBasePositionAndOrientation(robotId, np.append(base_traj_data[0, 0], 0.0), [0, 0, 0, 1])
 pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in q0])
 eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
 bt_pos = eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array([0, 0, move_down_distance]).T
@@ -141,17 +141,17 @@ while (True):
         if not traj_finish:
             ref_full = trajectory.at_time(tt)
             ref = [ref_full[i][:7] for i in range(3)]
-            ref_base = [ref_full[i][-2:] for i in range(3)]
+            #ref_base = [ref_full[i][-2:] for i in range(3)]
             pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in ref[0]],
                                        targetVelocities=[[q0_i] for q0_i in ref[1]])
-            pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
+            #pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
         else:
             # stop the robot immediately
             ref_full = trajectory.at_time(plan_time)
             ref = [ref_full[i][:7] for i in range(3)]
-            ref_base = [ref_full[i][-2:] for i in range(3)]
+            #ref_base = [ref_full[i][-2:] for i in range(3)]
             pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in ref[0]])
-            pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
+            #pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
     if not removed:
         # gripper and the object
         if tt > plan_time - 1 * delta_t:
@@ -177,7 +177,7 @@ while (True):
     tt = tt + delta_t
     if tt > trajectory.duration:
         traj_finish = True
-    time.sleep(delta_t*10)
+    time.sleep(delta_t*1)
     if tt > 6.0:
         break
 if not (video_path is None):

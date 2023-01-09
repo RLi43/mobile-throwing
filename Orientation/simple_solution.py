@@ -32,7 +32,7 @@ def forward(q):
     return AE, ori, J
 
 
-def solve(q0, box_position=np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT]), desired_theta=0):
+def solve(q0, box_position=np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT]), desired_theta=0, verbose=True):
     # Select a Q
     # keep joint 1, 3, 5, 7 = 0
     # q0 = np.array([0.0, 0.4, 0.0, -0.7, 0.0, 2.02, 0.0 + 45/180*np.pi])
@@ -47,7 +47,8 @@ def solve(q0, box_position=np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT]), desire
         theta_E = -np.pi - euler[1]
     # theta_E = pybullet.getEulerFromQuaternion(ori_q)[1] #np.arccos(ori_q[3]) * 2 * np.sign(ori_q[1])
     # print(AE, ori_q, theta_E)
-    print("r_E:{:.3f}, z_E:{:.3f}, theta_E:{:.3f}".format(AE[0], AE[2], theta_E))
+    if verbose:
+        print("r_E:{:.3f}, z_E:{:.3f}, theta_E:{:.3f}".format(AE[0], AE[2], theta_E))
 
     dz = box_position[2] - AE[2]  # - bottle_height / 2 * abs(np.cos(desired_theta))
     dr = box_position[0] - AE[0]
@@ -58,7 +59,8 @@ def solve(q0, box_position=np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT]), desire
         dtheta += 2 * np.pi
     # if dtheta > np.pi / 2:
     #    dtheta -= np.pi
-    print("dr:{:.3f}, dz:{:.3f}, dtheta:{:.3f}".format(dr, dz, dtheta))
+    if verbose:
+        print("dr:{:.3f}, dz:{:.3f}, dtheta:{:.3f}".format(dr, dz, dtheta))
 
     # find avaliable vx, vy
     def flying_time(vy):
@@ -104,10 +106,11 @@ def solve(q0, box_position=np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT]), desire
     omega = dtheta / ft
     landx = AE[0] + vx * ft
 
-    print('vx:{:.3f}, vy:{:.3f}, omega:{:.3f}, flying time:{:.3f}'.format(vx, vy, omega, ft))
     deviation = dr - vx * ft
-    print('translation on x:{:.3f}, deviation:{:.3f}'.format(vx * ft, deviation))
-    print('q_dot', q_dot)
+    if verbose:
+        print('vx:{:.3f}, vy:{:.3f}, omega:{:.3f}, flying time:{:.3f}'.format(vx, vy, omega, ft))
+        print('translation on x:{:.3f}, deviation:{:.3f}'.format(vx * ft, deviation))
+        print('q_dot', q_dot)
 
     def landing_pose(q_dot):
         # using simulator
@@ -238,14 +241,16 @@ if __name__ == '__main__':
     # q0 = np.array([0.0, 1.3, 0.0, -0.8, 0.0, 3.3, 45/180*np.pi])
 
     # FIND SOLUTIONS
+    import tqdm
     with open('succ.txt', 'w') as f:
-        f.write('(q0), (qo_dot), vx, vy, omega\n')
-        for qi1 in np.arange(-1.7, 1.7, 0.2):
-            for qi3 in np.arange(-3.0, 0.0, 0.2):
-                for qi5 in np.arange(0.0, 3.7, 0.2):
-                    succ, res = solve(np.array([0, qi1, 0, qi3, 0, qi5, 45/180*np.pi]), box_position)
+        f.write('(q0), (qo_dot), vx, vy, omega, landx\n')
+        for qi1 in tqdm.tqdm(np.arange(-1.7, 1.7, 0.1), desc=" qi1", position=0):
+            for qi3 in tqdm.tqdm(np.arange(-3.0, 0.0, 0.1), desc=" qi3", position=1):
+                for qi5 in np.arange(0.0, 3.7, 0.1):
+                    succ, res = solve(np.array([0, qi1, 0, qi3, 0, qi5, 45/180*np.pi]), box_position, verbose=False)
                     if succ:
-                        f.write('({}), ({}), {}, {}, {}\n'.format(repr(res[0]), repr(res[1]), res[2], res[3], res[4]))
+                        f.write('({}), ({}), {}, {}, {}, {}\n'.format(
+                            repr(res[0]), repr(res[1]), res[2], res[3], res[4], res[5]))
 
     #q0 = np.array([0.        ,  0.1       ,  0.        , -0.2       ,  0.        ,
     #    3.6       ,  0.78539816])

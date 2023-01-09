@@ -1,37 +1,67 @@
 <?xml version="1.0" ?>
-<robot name="bottle">
-  <link name="world"/>
+<robot name="filled_bottle">
+  <link name="baseLink"/>
   <joint name="bottle_to_world" type="fixed">
-    <parent link="world"/>
-    <child link="bottle"/>
-    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="baseLink"/>
+    <child link="bottle_head"/>
+    <origin rpy="-1.57 0 0" xyz="0 0 0"/>
   </joint>
-  <link name="bottle">
+  <link name="bottle_head">
     <contact>
       <rolling_friction value="0.001"/>
       <spinning_friction value="0.001"/>
-      <restitution value="0.9"/>
+      <restitution value="0.5"/>
     </contact>
     <inertial>
-      <origin rpy="0 0 0" xyz="0 0 0"/>
-      <!--        <mass value="${3.14159 * radius * radius * height}"/>-->
-      <mass value="0.5"/>
+      <origin rpy="0 0 0" xyz="0 134.5 0"/>
+      <mass value="0.032"/>
       <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
     </inertial>
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://objects_description/meshes/visual/bottle.obj" scale="1.0 1.0 1.0"/>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_bottle.obj" scale="1.0 1.0 1.0"/>
       </geometry>
-      <material name="blue">
-        <color rgba="0.1 0.8 1 0.8"/>
+      <material name="red">
+        <color rgba="1 0 0.2 0.7"/>
       </material>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-		<!--cylinder length="0.18" radius="0.03"/-->
-		<cylinder length="18" radius="3"/>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_bottle.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="bottle_filled_water" type="fixed">
+    <parent link="bottle_head"/>
+    <child link="bottle_water"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
+  <link name="bottle_water">
+    <contact>
+      <rolling_friction value="0.001"/>
+      <spinning_friction value="0.001"/>
+      <restitution value="0.6"/>
+    </contact>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 22 0"/>
+      <mass value="0.173"/>
+      <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_water.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0.8 1 0.9"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_water.obj" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>

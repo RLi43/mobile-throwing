@@ -4,7 +4,7 @@
   <joint name="bottle_to_world" type="fixed">
     <parent link="world"/>
     <child link="bottle"/>
-    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <origin rpy="0 1.57 0" xyz="0 0 0"/>
   </joint>
   <link name="bottle">
     <contact>
@@ -27,12 +27,11 @@
         <color rgba="0.1 0.8 1 0.8"/>
       </material>
     </visual>
-    <collision>
+    <!--collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-		<!--cylinder length="0.18" radius="0.03"/-->
 		<cylinder length="18" radius="3"/>
       </geometry>
-    </collision>
+    </collision-->
   </link>
 </robot>

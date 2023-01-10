@@ -97,6 +97,7 @@ def solve(q0, box_position=np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT]), desire
     res = minimize(obj, x_init, constraints=(
         {'type': 'ineq', 'fun': lambda x: x[0]},
         {'type': 'ineq', 'fun': lambda x: x[1]},
+        {'type': 'ineq', 'fun': lambda x: 1.7 - np.linalg.norm(x)},
         {'type': 'ineq', 'fun': lambda x: q_dot_ul * 0.9 - qdot4vel(x[0], x[1])[:, 0]},
         {'type': 'ineq', 'fun': lambda x: q_dot_ul * 0.9 + qdot4vel(x[0], x[1])[:, 0]},
     ))
@@ -234,33 +235,48 @@ def simulate(q0, vx, vy, omega, box_position, slow=10):
 #    deulers[deulers > np.pi / 2] -= np.pi
 #    print("Average deviation on orientation", np.average(np.abs(deulers), axis=0))
 
+def find_solutions(dq = 0.1, output_file='succ.txt'):
+    import tqdm
+    count = 0
+    with open(output_file, 'w') as f:
+        f.write('(q0), (qo_dot), vx, vy, omega, landx\n')
+        for qi1 in tqdm.tqdm(np.arange(-1.7, 1.7, dq), desc=" qi1", position=0):
+            for qi3 in tqdm.tqdm(np.arange(-3.0, 0.0, dq), desc=" qi3", position=1):
+                for qi5 in np.arange(0.0, 3.7, dq):
+                    succ, res = solve(np.array([0, qi1, 0, qi3, 0, qi5, 45/180*np.pi]), box_position, verbose=False)
+                    if succ:
+                        count += 1
+                        f.write('({}), ({}), {}, {}, {}, {}\n'.format(
+                            repr(res[0]), repr(res[1]), res[2], res[3], res[4], res[5]))
+    print('{} solutions found.'.format(count))
+
 if __name__ == '__main__':
     q_ul = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
     q_ll = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
     box_position = np.array([1.5, 0.0, 0.6 - PANDA_BASE_HEIGHT])
     # q0 = np.array([0.0, 1.3, 0.0, -0.8, 0.0, 3.3, 45/180*np.pi])
+    #find_solutions(output_file='succ17.txt')
 
-    # FIND SOLUTIONS
-    import tqdm
-    with open('succ.txt', 'w') as f:
-        f.write('(q0), (qo_dot), vx, vy, omega, landx\n')
-        for qi1 in tqdm.tqdm(np.arange(-1.7, 1.7, 0.1), desc=" qi1", position=0):
-            for qi3 in tqdm.tqdm(np.arange(-3.0, 0.0, 0.1), desc=" qi3", position=1):
-                for qi5 in np.arange(0.0, 3.7, 0.1):
-                    succ, res = solve(np.array([0, qi1, 0, qi3, 0, qi5, 45/180*np.pi]), box_position, verbose=False)
-                    if succ:
-                        f.write('({}), ({}), {}, {}, {}, {}\n'.format(
-                            repr(res[0]), repr(res[1]), res[2], res[3], res[4], res[5]))
-
-    #q0 = np.array([0.        ,  0.1       ,  0.        , -0.2       ,  0.        ,
+    #q0 = np.array([0.        ,  1.5       ,  0.        , -0.6       ,  0.        ,
+    #    3.5       ,  0.78539816])
+    #q0 = np.array([0.        ,  1.3       ,  0.        , -0.6       ,  0.        ,
+    #    3.1       ,  0.78539816])
+    #q0 = np.array([0.        ,  1.2       ,  0.        , -1.        ,  0.        ,
     #    3.6       ,  0.78539816])
-    #succ, res = solve(q0, box_position)
+    q0 = np.array([0.        , -1.4       ,  0.        , -0.2       ,  0.        ,
+        2.5       ,  0.78539816])
+    q0_dot = np.array([-9.61484478e-12,  9.58217451e-01,  3.68181345e-11, -1.96335790e+00,
+        2.49555275e-11, -2.58334181e+00, -2.95635052e-11])
+    from fixed_sol import vis
+    pybullet.disconnect()
+    vis(q0, q0_dot, landx=-0.17+0.4)
+    #succ, res = solve(q0, box_position, verbose=True)
     #if succ:
     #    print('qdot', res[1])
     #    #simulate(res[0], res[2], res[3], res[4], box_position)
     #    from fixed_sol import vis
     #    pybullet.disconnect()
-    #    vis(res[0], res[1], landx = res[5])
+    #    vis(res[0], res[1], landx = res[5]+0.4)#, video_path='bottle_flip.mp4')
     #else:
     #    print('Failed, qdot', res[1])
 

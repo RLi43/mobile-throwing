@@ -5,13 +5,17 @@ import pybullet
 import pybullet_data
 from ruckig import InputParameter, Ruckig, Trajectory
 
-PANDA_BASE_HEIGHT = 0.5076438625
-def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
+force = -0.11
+delay_release = 20
+PANDA_BASE_HEIGHT = 0.72 #0.5076438625
+
+
+def vis(qd, qd_dot, video_path=None, slow=1, landx=0.85):
     # the solution found by experiment (destination)
-    #qd = np.array([0.0, 1.3, 0.0, -0.8, 0.0, 3.3, 45/180*np.pi])
-    #qd_dot = np.array([0, -1.95750000, 0, 2.07607974, 0, 2.50923989, 0])
-    #qd = np.array([0.0, 0.4, 0.0, -0.7, 0.0, 2.02, 0.0 + 45/180*np.pi])
-    #qd_dot = np.array([0, -1.10508170520, 0, 2.15504300e+00, 0.0, 2.5504305e+00, 0]) * 0.999
+    # qd = np.array([0.0, 1.3, 0.0, -0.8, 0.0, 3.3, 45/180*np.pi])
+    # qd_dot = np.array([0, -1.95750000, 0, 2.07607974, 0, 2.50923989, 0])
+    # qd = np.array([0.0, 0.4, 0.0, -0.7, 0.0, 2.02, 0.0 + 45/180*np.pi])
+    # qd_dot = np.array([0, -1.10508170520, 0, 2.15504300e+00, 0.0, 2.5504305e+00, 0]) * 0.999
 
     # throw state
     clid = pybullet.connect(pybullet.DIRECT)
@@ -20,9 +24,10 @@ def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
     robot = pybullet.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True, flags=pybullet.URDF_USE_INERTIA_FROM_FILE)
     controlled_joints = [0, 1, 2, 3, 4, 5, 6]
     pybullet.resetJointStatesMultiDof(robot, controlled_joints, [[q0_i] for q0_i in qd])
-    AE =pybullet.getLinkState(robot, 11)[0]
+    AE = pybullet.getLinkState(robot, 11)[0]
     q = qd.tolist()
-    Jxyz, Jrpy = pybullet.calculateJacobian(robot, 11, [0, 0, 0], q+[0.1, 0.1], qd_dot.tolist() + [0.0]*2, [0.0]*9)
+    Jxyz, Jrpy = pybullet.calculateJacobian(robot, 11, [0, 0, 0], q + [0.1, 0.1], qd_dot.tolist() + [0.0] * 2,
+                                            [0.0] * 9)
     throw_state_xyz = np.array(Jxyz)[:, :7] @ qd_dot
     throw_state_rpy = np.array(Jrpy)[:, :7] @ qd_dot
     with np.printoptions(precision=3, suppress=True):
@@ -31,9 +36,8 @@ def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
         print('rpy', throw_state_rpy)
     pybullet.disconnect(clid)
 
-
     # initial state
-    q0 = np.array([0.0, 0.2, 0.0, -0.5, 0.0, 1.00, 0.0 + 45/180*np.pi])
+    q0 = np.array([0.0, 0.2, 0.0, -0.5, 0.0, 1.00, 0.0 + 45 / 180 * np.pi])
     q0_dot = np.array([0.0] * 7)
 
     # find trajectory
@@ -69,22 +73,19 @@ def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
     pybullet.setTimeStep(delta_t)
     pybullet.setRealTimeSimulation(0)
 
-    #AE = throw_config_full[-2]
-    #EB = box_position - AE
-
-    controlled_joints = [0, 1, 2, 3, 4, 5, 6] #[3, 4, 5, 6, 7, 8, 9]
+    controlled_joints = [0, 1, 2, 3, 4, 5, 6]  # [3, 4, 5, 6, 7, 8, 9]
     gripper_joints = [9, 10]
     numJoints = len(controlled_joints)
     pybullet.setAdditionalSearchPath(pybullet_data.getDataPath())
-    robotEndEffectorIndex = 11 #14
+    robotEndEffectorIndex = 11  # 14
     # robotId = pybullet.loadURDF("../descriptions/rbkairos_description/robots/rbkairos_panda_hand.urdf",
     #                      [0, 0, PANDA_BASE_HEIGHT], useFixedBase=True)
     robotId = pybullet.loadURDF("../descriptions/franka_panda_bullet_new/panda.urdf",
-                         [0, 0, PANDA_BASE_HEIGHT], useFixedBase=True)
+                                [0, 0, PANDA_BASE_HEIGHT], useFixedBase=True)
 
     planeId = pybullet.loadURDF("plane.urdf", [0, 0, 0.0])
-    #boxId = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/box.urdf", [1, 0, 0.5], globalScaling=1.0)
-    tableId = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/table.urdf", [landx, 0, 0], globalScaling=1.0)
+    tableId = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/table.urdf",
+                                [landx, 0, 0], globalScaling=1.0)
     # soccerballId = pybullet.loadURDF("soccerball.urdf", [-3.0, 0, 3], globalScaling=0.05)
     # pybullet.changeDynamics(soccerballId, -1, mass=1.0, linearDamping=0.00, angularDamping=0.00, rollingFriction=0.03,
     #                  spinningFriction=0.03, restitution=0.2, lateralFriction=0.03)
@@ -94,14 +95,13 @@ def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
     # pybullet.changeDynamics(bottleId, -1, mass=0.2, linearDamping=0.00, angularDamping=0.00,
     #                         rollingFriction=0.03,
     #                         spinningFriction=0.03, restitution=0.2, lateralFriction=0.03)
-    water_bottle_id = pybullet.loadURDF("../descriptions/robot_descriptions/objects_description/objects/water_bottle.urdf",
-                                        #flags=pybullet.URDF_MERGE_FIXED_LINKS,
-                                        globalScaling=0.001,
-                                        basePosition=[0, 0, 0], baseOrientation=[-0.7071068, 0, 0, 0.7071068],
-                                        )
+    water_bottle_id = pybullet.loadURDF(
+        "../descriptions/robot_descriptions/objects_description/objects/water_bottle.urdf",
+        # flags=pybullet.URDF_MERGE_FIXED_LINKS,
+        globalScaling=0.001, basePosition=[0, 0, 0], baseOrientation=[-0.7071068, 0, 0, 0.7071068])
     print(pybullet.getBodyInfo(water_bottle_id))
-    #print("water bottle 0:", pybullet.getDynamicsInfo(water_bottle_id, 0))
-    #print("water bottle 1:", pybullet.getDynamicsInfo(water_bottle_id, 1))
+    # print("water bottle 0:", pybullet.getDynamicsInfo(water_bottle_id, 0))
+    # print("water bottle 1:", pybullet.getDynamicsInfo(water_bottle_id, 1))
     bottle_height = 0.18
     move_down_distance = 0.21
 
@@ -127,7 +127,8 @@ def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
     q0 = traj_data[0, 0]
     pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in q0])
     eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
-    bt_pos = eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array([0, 0, move_down_distance]).T
+    bt_pos = eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array(
+        [0, 0, move_down_distance]).T
     pybullet.resetBasePositionAndOrientation(objectId, bt_pos, eef_state[1])
     pybullet.resetJointState(robotId, gripper_joints[0], 0.03)
     pybullet.resetJointState(robotId, gripper_joints[1], 0.03)
@@ -143,50 +144,69 @@ def vis(qd, qd_dot, video_path = None, slow = 1, landx = 1.5):
             if not traj_finish:
                 ref_full = trajectory.at_time(tt)
                 ref = [ref_full[i][:7] for i in range(3)]
-                #ref_base = [ref_full[i][-2:] for i in range(3)]
+                # ref_base = [ref_full[i][-2:] for i in range(3)]
                 pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in ref[0]],
-                                           targetVelocities=[[q0_i] for q0_i in ref[1]])
-                #pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
+                                                  targetVelocities=[[q0_i] for q0_i in ref[1]])
+                # pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
             else:
                 # stop the robot immediately
                 ref_full = trajectory.at_time(plan_time)
                 ref = [ref_full[i][:7] for i in range(3)]
-                #ref_base = [ref_full[i][-2:] for i in range(3)]
+                # ref_base = [ref_full[i][-2:] for i in range(3)]
                 pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in ref[0]])
-                #pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
+                # pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
         if not removed:
             # gripper and the object
-            if tt > plan_time - 1 * delta_t:
-                # open the gripper
-                pybullet.resetJointState(robotId, gripper_joints[0], 0.05)
-                pybullet.resetJointState(robotId, gripper_joints[1], 0.05)
-                print('Robot Trajectory finished')
-                eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
-                # print('End Effector', [["{0:.3f}".format(item) for item in eef_state[esi]]for esi in [0, 1, -2, -1]])
-                print('bottle', [["{0:.3f}".format(item) for item in value] for value in pybullet.getBasePositionAndOrientation(water_bottle_id)]
-                      + [["{0:.3f}".format(item) for item in value] for value in pybullet.getBaseVelocity(water_bottle_id)])
-                #pybullet.removeBody(robotId)
-                #removed = True
-            else:
+            if tt < plan_time - delay_release*delta_t:  # early release
                 # hold the ball
                 eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
                 pybullet.resetBasePositionAndOrientation(
                     objectId,
-                    eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array([0, 0, move_down_distance]).T,
+                    eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array(
+                        [0, 0, move_down_distance]).T,
                     eef_state[1])
-                pybullet.resetBaseVelocity(objectId, linearVelocity=np.array(eef_state[-2]), angularVelocity=eef_state[-1])
+                pybullet.resetBaseVelocity(objectId, linearVelocity=np.array(eef_state[-2]),
+                                           angularVelocity=eef_state[-1])
+            elif tt < plan_time:  # + delay_release * delta_t:
+                # open the gripper
+                pybullet.resetJointState(robotId, gripper_joints[0], 0.05)
+                pybullet.resetJointState(robotId, gripper_joints[1], 0.05)
+                eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
+                # apply force
+                object_state = pybullet.getLinkState(water_bottle_id, 0)
+                relative_vel = np.array(eef_state[-2]) - np.array(object_state[-2])
+                forcevec = force * relative_vel / np.linalg.norm(relative_vel)
+                pybullet.applyExternalForce(water_bottle_id, 0,
+                                            forcevec,
+                                            [0, 0, 0], pybullet.WORLD_FRAME)
+                print(forcevec)
+                print('bottle', [["{0:.3f}".format(item) for item in value] for value in
+                                 pybullet.getBasePositionAndOrientation(water_bottle_id)]
+                      + [["{0:.3f}".format(item) for item in value] for value in
+                         pybullet.getBaseVelocity(water_bottle_id)])
+            else:
+                # free motion
+                # print('Robot Trajectory finished')
+                # print('End Effector', [["{0:.3f}".format(item) for item in eef_state[esi]]for esi in [0, 1, -2, -1]])
+
+                #pybullet.removeBody(robotId)
+                #removed = True
+                pass
         pybullet.stepSimulation()
         tt = tt + delta_t
         if tt > trajectory.duration:
             traj_finish = True
-        time.sleep(delta_t*slow)
+        time.sleep(delta_t * slow)
         if tt > 6.0:
             break
     if not (video_path is None):
         pybullet.stopStateLogging(logId)
     pybullet.disconnect()
 
+
 if __name__ == '__main__':
-    qd = np.array([0.0, -1.7, 0.0, -2.1, 0.0, 3.6, 0.78539816])
-    qd_dot = np.array([0,  1.9575, 0, -1.9575, 0, -2.12158492, 0])
-    vis(qd, qd_dot, 'orientation_solution.mp4')
+    qd = np.array([0.0, 0.4, 0.0, -0.7, 0.0, 2.02, 0.0 + 45 / 180 * np.pi])
+    qd_dot = np.array([0, -1.10508170520, 0, 2.15504300e+00, 0.0, 2.5504305e+00, 0]) * 0.95
+    # qd = np.array([0.0, -1.7, 0.0, -2.1, 0.0, 3.6, 0.78539816])
+    # qd_dot = np.array([0,  1.9575, 0, -1.9575, 0, -2.12158492, 0])
+    vis(qd, qd_dot)#, 'evian.mp4')

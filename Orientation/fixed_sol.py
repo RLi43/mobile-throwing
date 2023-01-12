@@ -103,12 +103,18 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
     water_bottle_id = pybullet.loadURDF(
         "../descriptions/robot_descriptions/objects_description/objects/water_bottle.urdf",
         # flags=pybullet.URDF_MERGE_FIXED_LINKS,
-        globalScaling=0.001, basePosition=[0, 0, 0], baseOrientation=[-0.7071068, 0, 0, 0.7071068])
-    print(pybullet.getBodyInfo(water_bottle_id))
+        globalScaling=0.001, basePosition=[1, 0, 0.6],
+        baseOrientation=[0, 0, 0, 1])  # , flags=pybullet.URDF_MERGE_FIXED_LINKS)
+
+    bt_pos, bt_ori = pybullet.getBasePositionAndOrientation(water_bottle_id)
+    water_state = pybullet.getLinkState(water_bottle_id, 1)  # 0: position of the center of mass
+    cap_state = pybullet.getLinkState(water_bottle_id, 0)
+
+    # print(pybullet.getBodyInfo(water_bottle_id))
     # print("water bottle 0:", pybullet.getDynamicsInfo(water_bottle_id, 0))
     # print("water bottle 1:", pybullet.getDynamicsInfo(water_bottle_id, 1))
-    bottle_height = 0.18
-    move_down_distance = 0.21
+    bottle_height = 0.225
+    move_down_distance = - 0.0  # the cap is higher than the center of the gripper
 
     pybullet.changeDynamics(robotId, gripper_joints[0], jointUpperLimit=100)
     pybullet.changeDynamics(robotId, gripper_joints[1], jointUpperLimit=100)
@@ -131,10 +137,21 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
     # see https://github.com/bulletphysics/bullet3/issues/2803#issuecomment-770206176
     q0 = traj_data[0, 0]
     pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in q0])
-    eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
-    bt_pos = eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array(
-        [0, 0, move_down_distance]).T
-    pybullet.resetBasePositionAndOrientation(objectId, bt_pos, eef_state[1])
+
+    def set_bottle():
+        # rotate the bottle with the gripper
+        eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
+        # the base of the bottle is the bottom
+        # -- so the position of the bottle should go along the gripper z for bottle height - grasp length
+        bt_pos = eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) \
+                 @ np.array([0, 0, move_down_distance]).T
+        # flip the bottle
+        _, bt_ori = pybullet.multiplyTransforms([0, 0, 0], eef_state[1], [0, 0, 0], [0, 1, 0, 0])
+        pybullet.resetBasePositionAndOrientation(objectId, bt_pos, bt_ori)
+        pybullet.resetBaseVelocity(objectId, linearVelocity=np.array(eef_state[-2]),
+                                   angularVelocity=eef_state[-1])
+
+    set_bottle()
     pybullet.resetJointState(robotId, gripper_joints[0], 0.03)
     pybullet.resetJointState(robotId, gripper_joints[1], 0.03)
     tt = 0
@@ -164,21 +181,15 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
             # gripper and the object
             if tt < plan_time - delay_release*delta_t:  # early release
                 # hold the ball
-                eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
-                pybullet.resetBasePositionAndOrientation(
-                    objectId,
-                    eef_state[0] + np.array(pybullet.getMatrixFromQuaternion(eef_state[1])).reshape((3, 3)) @ np.array(
-                        [0, 0, move_down_distance]).T,
-                    eef_state[1])
-                pybullet.resetBaseVelocity(objectId, linearVelocity=np.array(eef_state[-2]),
-                                           angularVelocity=eef_state[-1])
+                set_bottle()
             elif tt <= plan_time:  # + delay_release * delta_t:
+                time.sleep(delta_t * 10)
                 # open the gripper
                 pybullet.resetJointState(robotId, gripper_joints[0], 0.05)
                 pybullet.resetJointState(robotId, gripper_joints[1], 0.05)
                 eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
                 # apply force
-                object_state = pybullet.getLinkState(water_bottle_id, 0)
+                object_state = pybullet.getLinkState(water_bottle_id, 0)  # the first link is the cap
                 relative_vel = np.array(eef_state[-2]) - np.array(object_state[-2])
                 forcevec = force * relative_vel / np.linalg.norm(relative_vel)
                 pybullet.applyExternalForce(water_bottle_id, 0,
@@ -190,6 +201,7 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
                       + [["{0:.3f}".format(item) for item in value] for value in
                          pybullet.getBaseVelocity(water_bottle_id)])
             else:
+                time.sleep(delta_t * 3)
                 # free motion
                 # print('Robot Trajectory finished')
                 # print('End Effector', [["{0:.3f}".format(item) for item in eef_state[esi]]for esi in [0, 1, -2, -1]])

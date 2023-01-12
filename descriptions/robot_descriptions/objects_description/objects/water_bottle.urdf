@@ -1,26 +1,36 @@
 <?xml version="1.0" ?>
 <robot name="filled_bottle">
   <link name="baseLink"/>
-  <joint name="bottle_to_world" type="fixed">
+  <joint name="bottle_cap" type="fixed">
     <parent link="baseLink"/>
-    <child link="bottle_head"/>
-    <origin rpy="-1.57 0 0" xyz="0 0 0"/>
+    <child link="cap"/>
+    <origin rpy="1.57 0 0" xyz="0 0 -225"/>
   </joint>
-  <link name="bottle_head">
+  <joint name="bottle_body" type="fixed">
+    <parent link="cap"/>
+    <child link="body"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
+  <joint name="bottle_water" type="fixed">
+    <parent link="cap"/>
+    <child link="water"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
+  <link name="cap">
     <contact>
       <rolling_friction value="0.001"/>
       <spinning_friction value="0.001"/>
       <restitution value="0.5"/>
     </contact>
     <inertial>
-      <origin rpy="0 0 0" xyz="0 134.5 0"/>
-      <mass value="0.032"/>
+      <origin rpy="0 0 0" xyz="0 206 0"/>
+      <mass value="0.012"/>
       <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
     </inertial>
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://objects_description/meshes/visual/water_bottle_bottle.obj" scale="1.0 1.0 1.0"/>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_cap.obj" scale="1.0 1.0 1.0"/>
       </geometry>
       <material name="red">
         <color rgba="1 0 0.2 0.7"/>
@@ -29,16 +39,38 @@
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://objects_description/meshes/visual/water_bottle_bottle.obj" scale="1.0 1.0 1.0"/>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_cap.obj" scale="1.0 1.0 1.0"/>
       </geometry>
     </collision>
   </link>
-  <joint name="bottle_filled_water" type="fixed">
-    <parent link="bottle_head"/>
-    <child link="bottle_water"/>
-    <origin rpy="0 0 0" xyz="0 0 0"/>
-  </joint>
-  <link name="bottle_water">
+  <link name="body">
+    <contact>
+      <rolling_friction value="0.001"/>
+      <spinning_friction value="0.001"/>
+      <restitution value="0.5"/>
+    </contact>
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 115.5 0"/>
+      <mass value="0.042"/>
+      <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
+    </inertial>
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_body.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.1 0.1 0.1 0.7"/>
+      </material>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="package://objects_description/meshes/visual/water_bottle_body.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="water">
     <contact>
       <rolling_friction value="0.001"/>
       <spinning_friction value="0.001"/>
@@ -46,7 +78,7 @@
     </contact>
     <inertial>
       <origin rpy="0 0 0" xyz="0 22 0"/>
-      <mass value="0.173"/>
+      <mass value="0.1536"/>
       <inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/>
     </inertial>
     <visual>

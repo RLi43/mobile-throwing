@@ -9,8 +9,13 @@ force = -0.11
 delay_release = 20
 PANDA_BASE_HEIGHT = 0.72 #0.5076438625
 
+robot_margin_position = 0.95
+robot_margin_velocity = 0.9999
+robot_margin_acceleration = 0.3
+robot_margin_jerk = 0.05
 
-def vis(qd, qd_dot, video_path=None, slow=1, landx=0.85):
+
+def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
     # the solution found by experiment (destination)
     # qd = np.array([0.0, 1.3, 0.0, -0.8, 0.0, 3.3, 45/180*np.pi])
     # qd_dot = np.array([0, -1.95750000, 0, 2.07607974, 0, 2.50923989, 0])
@@ -49,11 +54,11 @@ def vis(qd, qd_dot, video_path=None, slow=1, landx=0.85):
 
     inp.target_position = qd
     inp.target_velocity = qd_dot
-    inp.target_acceleration = np.zeros(7)
+    inp.target_acceleration = -qd_dot*1.0
 
-    inp.max_velocity = np.array([2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100])
-    inp.max_acceleration = np.array([15, 7.5, 10, 12.5, 15, 20, 20]) - 1.0
-    inp.max_jerk = np.array([7500, 3750, 5000, 6250, 7500, 10000, 10000]) - 100
+    inp.max_velocity = np.array([2.1750, 2.1750, 2.1750, 2.1750, 2.6100, 2.6100, 2.6100]) * robot_margin_velocity
+    inp.max_acceleration = np.array([15, 7.5, 10, 12.5, 15, 20, 20]) * robot_margin_acceleration
+    inp.max_jerk = np.array([7500, 3750, 5000, 6250, 7500, 10000, 10000]) * robot_margin_jerk
 
     otg = Ruckig(7)
     trajectory = Trajectory(7)
@@ -167,7 +172,7 @@ def vis(qd, qd_dot, video_path=None, slow=1, landx=0.85):
                     eef_state[1])
                 pybullet.resetBaseVelocity(objectId, linearVelocity=np.array(eef_state[-2]),
                                            angularVelocity=eef_state[-1])
-            elif tt < plan_time:  # + delay_release * delta_t:
+            elif tt <= plan_time:  # + delay_release * delta_t:
                 # open the gripper
                 pybullet.resetJointState(robotId, gripper_joints[0], 0.05)
                 pybullet.resetJointState(robotId, gripper_joints[1], 0.05)
@@ -196,7 +201,11 @@ def vis(qd, qd_dot, video_path=None, slow=1, landx=0.85):
         tt = tt + delta_t
         if tt > trajectory.duration:
             traj_finish = True
-        time.sleep(delta_t * slow)
+
+        cur = time.perf_counter()
+        while True:
+            if time.perf_counter() >= cur + delta_t * slow:
+                break
         if tt > 6.0:
             break
     if not (video_path is None):

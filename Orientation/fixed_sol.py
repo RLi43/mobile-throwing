@@ -5,7 +5,7 @@ import pybullet
 import pybullet_data
 from ruckig import InputParameter, Ruckig, Trajectory
 
-force = -0.11
+force = 0.0
 delay_release = 20
 PANDA_BASE_HEIGHT = 0.72 #0.5076438625
 
@@ -29,7 +29,7 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
     robot = pybullet.loadURDF(urdf_path, [0, 0, 0], useFixedBase=True, flags=pybullet.URDF_USE_INERTIA_FROM_FILE)
     controlled_joints = [0, 1, 2, 3, 4, 5, 6]
     pybullet.resetJointStatesMultiDof(robot, controlled_joints, [[q0_i] for q0_i in qd])
-    AE = pybullet.getLinkState(robot, 11)[0]
+    AE, ori= pybullet.getLinkState(robot, 11)[:2]
     q = qd.tolist()
     Jxyz, Jrpy = pybullet.calculateJacobian(robot, 11, [0, 0, 0], q + [0.1, 0.1], qd_dot.tolist() + [0.0] * 2,
                                             [0.0] * 9)
@@ -37,8 +37,10 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
     throw_state_rpy = np.array(Jrpy)[:, :7] @ qd_dot
     with np.printoptions(precision=3, suppress=True):
         print('throw state')
-        print('xyz', throw_state_xyz)
-        print('rpy', throw_state_rpy)
+        print('xyz', AE)
+        print('rpy', pybullet.getEulerFromQuaternion(ori))
+        print('vel xyz', throw_state_xyz)
+        print('vel rpy', throw_state_rpy)
     pybullet.disconnect(clid)
 
     # initial state
@@ -106,10 +108,6 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
         globalScaling=0.001, basePosition=[1, 0, 0.6],
         baseOrientation=[0, 0, 0, 1])  # , flags=pybullet.URDF_MERGE_FIXED_LINKS)
 
-    bt_pos, bt_ori = pybullet.getBasePositionAndOrientation(water_bottle_id)
-    water_state = pybullet.getLinkState(water_bottle_id, 1)  # 0: position of the center of mass
-    cap_state = pybullet.getLinkState(water_bottle_id, 0)
-
     # print(pybullet.getBodyInfo(water_bottle_id))
     # print("water bottle 0:", pybullet.getDynamicsInfo(water_bottle_id, 0))
     # print("water bottle 1:", pybullet.getDynamicsInfo(water_bottle_id, 1))
@@ -175,7 +173,7 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
                 ref_full = trajectory.at_time(plan_time)
                 ref = [ref_full[i][:7] for i in range(3)]
                 # ref_base = [ref_full[i][-2:] for i in range(3)]
-                pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in ref[0]])
+                #pybullet.resetJointStatesMultiDof(robotId, controlled_joints, [[q0_i] for q0_i in ref[0]])
                 # pybullet.resetBasePositionAndOrientation(robotId, np.append(ref_base[0], 0.0), [0, 0, 0, 1])
         if not removed:
             # gripper and the object
@@ -189,7 +187,7 @@ def vis(qd, qd_dot, video_path=None, slow=1.0, landx=0.85):
                 pybullet.resetJointState(robotId, gripper_joints[1], 0.05)
                 eef_state = pybullet.getLinkState(robotId, robotEndEffectorIndex, computeLinkVelocity=1)
                 # apply force
-                object_state = pybullet.getLinkState(water_bottle_id, 0)  # the first link is the cap
+                object_state = pybullet.getLinkState(water_bottle_id, 0, computeLinkVelocity=1)  # the first link is the cap
                 relative_vel = np.array(eef_state[-2]) - np.array(object_state[-2])
                 forcevec = force * relative_vel / np.linalg.norm(relative_vel)
                 pybullet.applyExternalForce(water_bottle_id, 0,
